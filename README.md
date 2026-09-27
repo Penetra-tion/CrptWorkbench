@@ -1,31 +1,31 @@
 # CRPT Workbench
 
-Blazor Server workbench for True API, National Catalog and SUZ. Safe mock mode remains the default. When explicitly enabled through server configuration, True API can authenticate with a CryptoPro-backed certificate and execute the read-only production `POST /cises/info`; the National Catalog can read an own product card and its permit documents by one GTIN with the protected profile Bearer token. SUZ remains a local mock.
+CRPT Workbench — рабочее место на Blazor Server для True API, Национального каталога и СУЗ. Безопасный mock-режим остается режимом по умолчанию. При явном включении в серверной конфигурации True API может проходить аутентификацию с сертификатом CryptoPro и выполнять разрешенные production-операции; Национальный каталог может читать собственную карточку товара и разрешительные документы по одному GTIN с защищенным Bearer-токеном профиля. СУЗ остается локальным mock.
 
-The UI includes light and dark themes, a collapsible navigation panel, back navigation, and an API console with user-friendly and full technical response views. True API includes a local implementation of `POST /cises/info`: paste up to 1000 normalized marking or package codes, one per line, to see product details, status, dates, shelf life, permit documents, and immediate package relationships. The field hint contains deterministic UNIT, GROUP, and BOX examples; other valid codes return a simulated 404 item. The optional `pg` query parameter is intentionally omitted.
+Интерфейс поддерживает светлую и темную темы, сворачиваемую навигационную панель, возврат назад и API-консоль с удобным и полным техническим представлением ответов. True API включает локальную реализацию `POST /cises/info`: можно вставить до 1000 нормализованных кодов маркировки или упаковок, по одному на строку, и увидеть сведения о товаре, статус, даты, срок годности, разрешительные документы и прямые связи упаковок. Подсказка поля содержит детерминированные примеры UNIT, GROUP и BOX; остальные валидные коды возвращают смоделированный элемент 404. Необязательный параметр запроса `pg` намеренно не отправляется.
 
-## Run
+## Запуск
 
 ```powershell
 dotnet restore CrptWorkbench.sln -p:RestoreUseStaticGraphEvaluation=true
 dotnet run --project src/CrptWorkbench.Web/CrptWorkbench.Web.csproj
 ```
 
-Open `http://localhost:5065` with the default http launch profile. A demo profile and SQLite database are created on first start under `src/CrptWorkbench.Web/App_Data`.
+Откройте `http://localhost:5065` с профилем запуска http по умолчанию. При первом запуске демо-профиль и база SQLite создаются в `src/CrptWorkbench.Web/App_Data`.
 
-## Logging
+## Логирование
 
-Serilog writes separate `server` and `client` files in `Crpt:DataDirectory/logs`. Client means Blazor interface events, recorded on the server. Configure levels through `Serilog:LevelSwitches:$server` and `$client` in appsettings.json; levels reload automatically. File paths and rotation are configured in the two Serilog file sinks and require restart. Defaults are Information, daily/20 MB rotation and 31 files per channel. Console logging is disabled.
+Serilog пишет отдельные файлы `server` и `client` в `Crpt:DataDirectory/logs`. `client` означает события интерфейса Blazor, записанные на сервере. Уровни настраиваются через `Serilog:LevelSwitches:$server` и `$client` в `appsettings.json`; уровни перечитываются автоматически. Пути файлов и ротация настраиваются в двух файловых sink Serilog и требуют перезапуска. По умолчанию используется уровень Information, ежедневная ротация по 20 МБ и 31 файл на канал. Логирование в консоль отключено.
 
-## Windows Server production
+## Production на Windows Server
 
-Build a self-contained service package:
+Собрать самодостаточный пакет службы:
 
 ```powershell
 PowerShell -ExecutionPolicy Bypass -File .\deploy\windows\Build-Package.ps1
 ```
 
-The package is written to `artifacts/windows/CrptWorkbench-win-x64.zip`. See [the Windows production deployment guide](docs/deployment/windows-production.md) for CryptoPro, certificate, service-account, installation, verification and rollback steps. The service binds only to `127.0.0.1:5080`.
+Пакет будет создан в `artifacts/windows/CrptWorkbench-win-x64.zip`. Инструкции по CryptoPro, сертификату, учетной записи службы, установке, проверке и откату описаны в [руководстве по production-развертыванию на Windows](docs/deployment/windows-production.md). Служба слушает только `127.0.0.1:5080`.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for layer boundaries and extension points.
+Границы слоев и точки расширения описаны в [ARCHITECTURE.md](ARCHITECTURE.md).
 
