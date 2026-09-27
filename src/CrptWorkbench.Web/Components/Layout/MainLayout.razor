@@ -1,0 +1,125 @@
+@inject ILogger<MainLayout> Logger
+@inject NavigationManager Navigation
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject ProfileService Profiles
+@inject WorkbenchContext Workbench
+@inject IJSRuntime JavaScript
+@using System.Reflection
+
+<div class="shell @(_sidebarCollapsed ? "sidebar-collapsed" : null)">
+    <aside class="sidebar">
+        <div class="sidebar-head">
+            <a class="brand" href="/" title="CRPT Workbench"><span class="brand-short">CW</span><span class="brand-full">CRPT <em>Workbench</em></span></a>
+            <button type="button" class="icon-button sidebar-toggle" @onclick="ToggleSidebarAsync" aria-label="@(_sidebarCollapsed ? "Развернуть боковую панель" : "Свернуть боковую панель")" title="@(_sidebarCollapsed ? "Развернуть меню" : "Свернуть меню")">
+                <span aria-hidden="true">@(_sidebarCollapsed ? "»" : "«")</span>
+            </button>
+        </div>
+
+        <nav aria-label="Основная навигация">
+            <NavLink href="/" Match="NavLinkMatch.All" title="Обзор"><span class="nav-icon" aria-hidden="true">⌂</span><span class="nav-label">Обзор</span></NavLink>
+            <NavLink href="/console" title="API Console"><span class="nav-icon code-icon" aria-hidden="true">›_</span><span class="nav-label">API Console</span></NavLink>
+            <NavLink href="/tracex" title="TraceX"><span class="nav-icon" aria-hidden="true">▤</span><span class="nav-label">TraceX</span></NavLink>
+            <NavLink class="long-nav" href="/special-features" title="Специальные возможности"><span class="nav-icon" aria-hidden="true">⌘</span><span class="nav-label">Специальные возможности</span></NavLink>
+            <NavLink href="/history" title="История"><span class="nav-icon" aria-hidden="true">↺</span><span class="nav-label">История</span></NavLink>
+            <NavLink href="/settings" title="Настройки"><span class="nav-icon" aria-hidden="true">⚙</span><span class="nav-label">Настройки</span></NavLink>
+        </nav>
+
+        <div class="sidebar-footer">
+            <IntegrationModes Compact="true" />
+            <div class="app-version" title="Версия CRPT Workbench">v@(ApplicationVersion)</div>
+        </div>
+    </aside>
+
+    <section class="workspace">
+        <header class="topbar">
+            <div class="topbar-context">
+                <div class="topbar-mark" aria-hidden="true"><img src="@Assets["favicon.svg"]" alt="" /></div>
+                <div class="profile-title">
+                    <span class="profile-caption">Активный профиль</span>
+                    <strong>@(_profiles.FirstOrDefault(x => x.Id == Workbench.ProfileId)?.Name ?? "Профиль не выбран")</strong>
+                </div>
+            </div>
+            <div class="selectors">
+                <select value="@Workbench.ProfileId" @onchange="ChangeProfile" aria-label="Текущий профиль">
+                    @foreach (var profile in _profiles)
+                    {
+                        <option value="@profile.Id">@profile.Name</option>
+                    }
+                </select>
+                <button type="button" class="icon-button theme-toggle" @onclick="ToggleThemeAsync" aria-label="@(_theme == "dark" ? "Включить светлую тему" : "Включить тёмную тему")" title="Переключить тему">
+                    <span aria-hidden="true">@(_theme == "dark" ? "☀" : "☾")</span>
+                </button>
+            </div>
+        </header>
+        <main class="content">@Body</main>
+    </section>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Произошла ошибка. <a href="." class="reload">Перезагрузить</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private IReadOnlyList<CrptProfile> _profiles = [];
+    private bool _sidebarCollapsed;
+    private string _theme = "dark";
+    private static string ApplicationVersion =>
+        typeof(MainLayout).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
+        ?? typeof(MainLayout).Assembly.GetName().Version?.ToString(3)
+        ?? "0.0.0";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _profiles = await Profiles.ListAsync();
+        Workbench.ProfileId ??= _profiles.FirstOrDefault()?.Id;
+        Workbench.ProfileChanged += OnProfileChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        Navigation.LocationChanged += OnLocationChanged;
+        LogPage(Navigation.Uri);
+        var appearance = await JavaScript.InvokeAsync<AppearancePreferences>("crptWorkbench.getAppearance");
+        _theme = appearance.Theme;
+        _sidebarCollapsed = appearance.SidebarCollapsed;
+        StateHasChanged();
+    }
+
+    private void ChangeProfile(ChangeEventArgs args)
+    {
+        if (Guid.TryParse(args.Value?.ToString(), out var id)) Workbench.ProfileId = id;
+    }
+
+    private void OnProfileChanged(object? sender, Guid? profileId) => _ = InvokeAsync(async () =>
+    {
+        _profiles = await Profiles.ListAsync();
+        StateHasChanged();
+    });
+
+    private async Task ToggleThemeAsync()
+    {
+        _theme = await JavaScript.InvokeAsync<string>("crptWorkbench.toggleTheme");
+    }
+
+    private async Task ToggleSidebarAsync()
+    {
+        _sidebarCollapsed = !_sidebarCollapsed;
+        await JavaScript.InvokeVoidAsync("crptWorkbench.saveSidebar", _sidebarCollapsed);
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args) => LogPage(args.Location);
+
+    private void LogPage(string uri) => Logger.LogInformation("UI navigation {Page}", CrptWorkbench.Web.WorkbenchLogging.PageName(uri));
+
+    public void Dispose()
+    {
+        Workbench.ProfileChanged -= OnProfileChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+
+    private sealed record AppearancePreferences(string Theme, bool SidebarCollapsed);
+}
+

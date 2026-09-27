@@ -1,0 +1,159 @@
+@page "/history"
+@using System.Text.Json
+@using Microsoft.AspNetCore.WebUtilities
+@inject HistoryService HistoryService
+@inject IApiOperationRegistry Registry
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<PageTitle>История — CRPT Workbench</PageTitle>
+
+<div class="page-heading"><div><span class="eyebrow">Диагностика</span><h1>История запросов</h1></div><button class="button ghost" @onclick="LoadAsync">Обновить</button></div>
+
+<div class="history-grid @(_items.Count == 0 && !_missing ? "history-empty" : null)">
+    <section class="panel history-list">
+        @if (_items.Count == 0) { <div class="empty">История пуста.</div> }
+        else
+        {
+            <table><thead><tr><th>Время</th><th>Система</th><th>Операция</th><th>Статус</th><th>мс</th></tr></thead>
+            <tbody>
+                @foreach (var item in _items)
+                {
+                    <tr class="request-row @(_selected?.Id == item.Id ? "selected" : null)" role="link" tabindex="0" aria-label="@($"Открыть запрос: {OperationName(item.OperationId)}")" aria-current="@(_selected?.Id == item.Id ? "true" : null)" @onclick="() => OpenHistory(item.Id)" @onkeydown="args => OnRowKeyDown(args, item.Id)"><td>@item.CreatedAt.ToLocalTime().ToString("dd.MM HH:mm:ss")</td><td>@SystemName(item.System)</td><td><a class="history-operation-link" href="@($"/history?id={item.Id}")" tabindex="-1" @onclick:stopPropagation="true">@OperationName(item.OperationId)</a></td><td><span class="status @(item.Success ? "ok" : "fail")">@(item.StatusCode?.ToString() ?? "ERR")</span></td><td>@item.DurationMs</td></tr>
+                }
+            </tbody></table>
+        }
+    </section>
+
+    @if (_items.Count > 0 || _missing)
+    {
+    <section class="panel detail">
+        @if (_missing) { <div class="notice error" role="alert">Запись не найдена. Выберите другой запрос в списке.</div> }
+        else if (_selected is null) { <div class="empty">Выберите запрос в списке.</div> }
+        else
+        {
+            <div @key="_selected.Id" class="history-result-enter">
+            <h2>@OperationName(_selected.OperationId)</h2>
+            <div class="metrics"><span>@SystemName(_selected.System)</span><span>@(_selected.StatusCode?.ToString() ?? "ERR")</span><span>@_selected.DurationMs мс</span></div>
+            <div class="result-view-switch view-switch" role="group" aria-label="Представление результата">
+                <button type="button" class="@(!_technicalMode ? "active" : null)" aria-pressed="@(!_technicalMode)" @onclick="() => _technicalMode = false">◫ Обычный</button>
+                <button type="button" class="@(_technicalMode ? "active" : null)" aria-pressed="@_technicalMode" @onclick="() => _technicalMode = true">{ } Технический</button>
+            </div>
+            @if (!_technicalMode)
+            {
+                @if (_result?.Codes is not null) { <CodeInfoResultView Results="_result.Codes" OnCodeSelected="RequestRelatedCode" /> }
+                else if (_result?.Product is not null) { <NationalCatalogProductResultView Result="_result.Product" /> }
+                else if (_result?.Documents is not null) { <DocumentStatusResultView Results="_result.Documents" /> }
+                else if (_result?.Fields.Count > 0)
+                {
+                    <div class="result-grid">
+                        @foreach (var field in _result.Fields)
+                        {
+                            <article class="result-field"><span>@field.Label</span><strong>@field.Value</strong></article>
+                        }
+                    </div>
+                }
+                else { <div class="notice error" role="alert">@_result?.Notice</div> }
+            }
+            else
+            {
+                <div class="muted">Идентификатор операции: @_selected.OperationId</div>
+                @if (!string.IsNullOrEmpty(_selected.Error)) { <div class="notice error">@_selected.Error</div> }
+                @if (ReadExchanges(_selected).Count > 0)
+                {
+                    @foreach (var exchange in ReadExchanges(_selected))
+                    {
+                        <details class="exchange-section" open><summary>@exchange.HttpMethod @exchange.RequestUrl — HTTP @exchange.StatusCode</summary>
+                        <div class="exchange-content"><h3>Request</h3><pre>@exchange.RequestHeaders</pre>@if (!string.IsNullOrWhiteSpace(exchange.RequestBody)) { <pre>@exchange.RequestBody</pre> }<h3>Response</h3><pre>@exchange.ResponseHeaders</pre><pre>@exchange.ResponseBody</pre></div></details>
+                    }
+                }
+                else
+                {
+                    <h3>Request</h3><div class="request-url">@_selected.Url</div><pre>@_selected.RequestHeaders</pre>@if (!string.IsNullOrWhiteSpace(_selected.RequestBody)) { <pre>@_selected.RequestBody</pre> }
+                    <h3>Response</h3><pre>@_selected.ResponseHeaders</pre><pre>@_selected.ResponseBody</pre>
+                }
+            }
+            </div>
+        }
+    </section>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<ApiRequestLog> _items = [];
+    private IReadOnlyDictionary<string, string> _names = new Dictionary<string, string>();
+    private ApiRequestLog? _selected;
+    private SavedResultView? _result;
+    private bool _technicalMode;
+    private bool _missing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _names = Registry.List().ToDictionary(x => x.Id, x => x.Name, StringComparer.OrdinalIgnoreCase);
+        Navigation.LocationChanged += OnLocationChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _items = await HistoryService.ListAsync();
+        await SelectFromUrlAsync();
+    }
+
+    private async Task SelectFromUrlAsync()
+    {
+        var query = QueryHelpers.ParseQuery(Navigation.ToAbsoluteUri(Navigation.Uri).Query);
+        if (query.TryGetValue("id", out var rawId))
+        {
+            if (Guid.TryParse(rawId.ToString(), out var id))
+            {
+                var item = _items.FirstOrDefault(x => x.Id == id) ?? await HistoryService.GetAsync(id);
+                SetSelected(item, item is null);
+            }
+            else SetSelected(null, true);
+        }
+        else SetSelected(_items.FirstOrDefault(), false);
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => _ = InvokeAsync(async () =>
+    {
+        await SelectFromUrlAsync();
+        StateHasChanged();
+    });
+
+    private void OpenHistory(Guid id) => Navigation.NavigateTo($"/history?id={id}");
+    private void RequestRelatedCode(string code) => Navigation.NavigateTo($"/console?code={Uri.EscapeDataString(code)}", forceLoad: true);
+    private void OnRowKeyDown(KeyboardEventArgs args, Guid id)
+    {
+        if (args.Key == "Enter") OpenHistory(id);
+    }
+
+    private void SetSelected(ApiRequestLog? item, bool missing)
+    {
+        _selected = item;
+        _result = item is null ? null : SavedResultView.From(item);
+        _missing = missing;
+        _technicalMode = false;
+    }
+
+    private string OperationName(string id) => id switch
+    {
+        CodeCorrectionService.OperationId => "Корректировка сведений о кодах",
+        PackageAggregationService.OperationId => "Формирование упаковки",
+        PackageTransformationService.OperationId => "Трансформация упаковки",
+        _ => _names.GetValueOrDefault(id, "Другая операция")
+    };
+    private static string SystemName(ApiSystem system) => system switch
+    {
+        ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", ApiSystem.Suz => "СУЗ", _ => "Другая система"
+    };
+
+    private static IReadOnlyList<ApiHttpExchange> ReadExchanges(ApiRequestLog item)
+    {
+        if (string.IsNullOrWhiteSpace(item.ExchangesJson)) return [];
+        try { return JsonSerializer.Deserialize<ApiHttpExchange[]>(item.ExchangesJson, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? []; }
+        catch (JsonException) { return []; }
+    }
+
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+}

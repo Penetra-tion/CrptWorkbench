@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+.dotnet-cli/
+*.db
+*.db-shm
+*.db-wal
+appsettings.Local.json
+**/App_Data/
+TestResults/
+artifacts/
+
+**/logs/
+*.log

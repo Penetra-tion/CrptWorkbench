@@ -1,0 +1,15 @@
+@inject IOptions<CrptIntegrationOptions> IntegrationOptions
+
+<div class="integration-modes @(Compact ? "compact" : null)" aria-label="Режим интеграций">
+    <div class="integration-mode @(IsProduction ? "production" : "mock")" title="Режим интеграций — @Mode" aria-label="Режим интеграций — @Mode">
+        <span class="status-dot" aria-hidden="true"></span>
+        <strong class="integration-value">@Mode</strong>
+    </div>
+</div>
+
+@code {
+    [Parameter] public bool Compact { get; set; }
+
+    private bool IsProduction => IntegrationOptions.Value.Mode == CrptIntegrationMode.Production;
+    private string Mode => IsProduction ? "PRODUCTION" : "MOCK";
+}

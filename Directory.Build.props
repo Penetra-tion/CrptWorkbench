@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <!-- Single source of truth for assembly metadata and the UI version label. -->
+    <CrptWorkbenchVersion>1.9.13</CrptWorkbenchVersion>
+    <Version>$(CrptWorkbenchVersion)</Version>
+    <AssemblyVersion>$(CrptWorkbenchVersion).0</AssemblyVersion>
+    <FileVersion>$(CrptWorkbenchVersion).0</FileVersion>
+    <InformationalVersion>$(CrptWorkbenchVersion)</InformationalVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <!-- Local Debug runs must not depend on NuGet's remote vulnerability feed. -->
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+</Project>

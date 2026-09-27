@@ -1,0 +1,98 @@
+@page "/"
+@implements IDisposable
+@inject ProfileService Profiles
+@inject HistoryService History
+@inject IApiOperationRegistry Registry
+@inject NavigationManager Navigation
+@inject WorkbenchContext Workbench
+@inject IOptions<CrptIntegrationOptions> IntegrationOptions
+
+<PageTitle>Обзор — CRPT Workbench</PageTitle>
+
+<div class="page-heading">
+    <div><span class="eyebrow">Рабочее пространство</span><h1>Обзор</h1></div>
+    <a class="button primary" href="/console">Открыть API Console</a>
+</div>
+
+<div class="notice production-notice"><strong>@TrueApiHeadline</strong> @TrueApiDescription</div>
+
+<div class="cards overview-cards">
+    <article class="card"><span>Активный профиль</span><strong>@(_profile?.Name ?? "Не выбран")</strong><small>ИНН: @(_profile?.Inn ?? "—")</small></article>
+    <article class="card"><span>Сертификат</span><strong>@_certificateStatus</strong><small>@_certificateDetails</small></article>
+    <article class="card"><span>Интеграции</span><IntegrationModes /></article>
+</div>
+
+<section class="panel">
+    <div class="panel-title"><h2>Последние запросы</h2><a href="/history">Вся история →</a></div>
+    @if (_history.Count == 0)
+    {
+        <div class="empty">Запросов ещё нет. Запустите одну из demo-операций.</div>
+    }
+    else
+    {
+        <div class="table-wrap"><table>
+            <thead><tr><th>Время</th><th>Система</th><th>Операция</th><th>Статус</th><th>Длительность</th></tr></thead>
+            <tbody>
+                @foreach (var item in _history)
+                {
+                    <tr class="request-row" role="link" tabindex="0" aria-label="@($"Открыть запрос: {OperationName(item.OperationId)}")" @onclick="() => OpenHistory(item.Id)" @onkeydown="args => OnRowKeyDown(args, item.Id)"><td>@item.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td><td>@SystemName(item.System)</td><td><a class="history-operation-link" href="@($"/history?id={item.Id}")" tabindex="-1" @onclick:stopPropagation="true">@OperationName(item.OperationId)</a></td><td><span class="status @(item.Success ? "ok" : "fail")">@(item.StatusCode?.ToString() ?? "ERR")</span></td><td>@item.DurationMs ms</td></tr>
+                }
+            </tbody>
+        </table></div>
+    }
+</section>
+
+@code {
+    private CrptProfile? _profile;
+    private IReadOnlyList<ApiRequestLog> _history = [];
+    private IReadOnlyDictionary<string, string> _names = new Dictionary<string, string>();
+    private string _certificateStatus = "Не выбран";
+    private string _certificateDetails = "Настройте сертификат в профиле";
+    private bool IsProduction => IntegrationOptions.Value.Mode == CrptIntegrationMode.Production;
+    private string TrueApiHeadline => IsProduction ? "Промышленный контур." : "Локальная симуляция.";
+    private string TrueApiDescription => IsProduction
+        ? "True API и Национальный каталог работают с промышленным контуром. СУЗ работает в mock-режиме."
+        : "Все интеграции работают в mock-режиме. Сетевые запросы в Честный Знак не выполняются.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _names = Registry.List().ToDictionary(x => x.Id, x => x.Name, StringComparer.OrdinalIgnoreCase);
+        Workbench.ProfileChanged += OnProfileChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var profiles = await Profiles.ListAsync();
+        Workbench.ProfileId ??= profiles.FirstOrDefault()?.Id;
+        _profile = profiles.FirstOrDefault(x => x.Id == Workbench.ProfileId);
+        _history = await History.ListAsync(5);
+        _certificateStatus = "Не выбран";
+        _certificateDetails = "Настройте сертификат в профиле";
+        if (!string.IsNullOrWhiteSpace(_profile?.CertificateThumbprint))
+        {
+            var validation = await Profiles.ValidateCertificateAsync(_profile.CertificateThumbprint);
+            _certificateStatus = validation.IsValid && validation.HasPrivateKey ? "Готов" : "Требует внимания";
+            _certificateDetails = validation.Message;
+        }
+    }
+
+    private void OnProfileChanged(object? sender, Guid? profileId) => _ = InvokeAsync(async () =>
+    {
+        await LoadAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose() => Workbench.ProfileChanged -= OnProfileChanged;
+    private void OpenHistory(Guid id) => Navigation.NavigateTo($"/history?id={id}");
+    private void OnRowKeyDown(KeyboardEventArgs args, Guid id)
+    {
+        if (args.Key == "Enter") OpenHistory(id);
+    }
+    private string OperationName(string id) => id == CodeCorrectionService.OperationId
+        ? "Корректировка сведений о кодах" : _names.GetValueOrDefault(id, "Другая операция");
+    private static string SystemName(ApiSystem system) => system switch
+    {
+        ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", ApiSystem.Suz => "СУЗ", _ => "Другая система"
+    };
+}

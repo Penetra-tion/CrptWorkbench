@@ -1,0 +1,378 @@
+@inject ILogger<ApiConsole> Logger
+@page "/console"
+@implements IDisposable
+@using System.Text.Json
+@using Microsoft.AspNetCore.WebUtilities
+@inject IApiOperationRegistry Registry
+@inject ExecuteApiOperationService Executor
+@inject ProfileService Profiles
+@inject FavoriteApiOperationService Favorites
+@inject WorkbenchContext Workbench
+@inject IJSRuntime JavaScript
+@inject IOptions<CrptIntegrationOptions> IntegrationOptions
+@inject NavigationManager Navigation
+
+<PageTitle>API Console — CRPT Workbench</PageTitle>
+
+<div class="page-heading console-heading">
+    <div><span class="eyebrow">Операции Честного Знака</span><h1>API Console</h1></div>
+</div>
+
+<div class="notice production-notice"><strong>@ModeHeadline</strong> @ModeDescription</div>
+
+<div class="tabs system-tabs" role="tablist" aria-label="Система API">
+    <button type="button" role="tab" disabled="@_running" aria-selected="@_favoritesView" class="@(_favoritesView ? "active" : null)" @onclick="SelectFavorites">★ Избранное</button>
+    @foreach (var system in SystemTabOrder)
+    {
+        <button type="button" role="tab" disabled="@_running" aria-selected="@(_system == system)" class="@(_system == system ? "active" : null)" @onclick="() => SelectSystem(system)">@SystemName(system)</button>
+    }
+</div>
+
+<div class="console-grid">
+    <aside class="operations-panel panel">
+        <span class="eyebrow">@(_favoritesView ? "Избранные операции" : "Доступные операции")</span>
+        <div class="operations">
+        @if (!VisibleOperations.Any())
+        {
+            <div class="empty compact-empty">Добавьте операции в избранное с помощью звезды.</div>
+        }
+        else
+        {
+            @foreach (var operation in VisibleOperations)
+            {
+                <div class="operation-row">
+                    <button type="button" disabled="@_running" class="operation operation-select @(_selected?.Id == operation.Id ? "active" : null)" @onclick="() => SelectOperation(operation)">
+                        <span class="operation-main"><strong>@operation.Name</strong><span class="method-badge">@operation.HttpMethod</span></span>
+                        <small>@operation.Description</small>
+                        @if (_favoritesView) { <small class="operation-system">@SystemName(operation.System)</small> }
+                    </button>
+                    <button type="button" disabled="@(_running || Workbench.ProfileId is null)" class="favorite-toggle @(IsFavorite(operation.Id) ? "active" : null)" @onclick="() => ToggleFavoriteAsync(operation)" aria-label="@(IsFavorite(operation.Id) ? $"Удалить «{operation.Name}» из избранного" : $"Добавить «{operation.Name}» в избранное")" title="@(IsFavorite(operation.Id) ? "Удалить из избранного" : "Добавить в избранное")">@(IsFavorite(operation.Id) ? "★" : "☆")</button>
+                </div>
+            }
+        }
+        </div>
+    </aside>
+
+    <section class="panel editor">
+        @if (_selected is not null)
+        {
+            <div class="operation-title">
+                <div><span class="eyebrow">@SystemName(_selected.System)</span><h2>@_selected.Name</h2></div>
+                <span class="method-badge large">@_selected.HttpMethod</span>
+            </div>
+            <p class="muted">@_selected.Description</p>
+
+            <div class="field-grid">
+                @foreach (var field in _selected.Fields)
+                {
+                    <label class="@(field.CheckedValue is null ? null : "checkbox-field")">
+                        @if (field.CheckedValue is not null)
+                        {
+                            <input type="checkbox" checked="@(GetValue(field.Name) == field.CheckedValue)" @onchange="args => SetValue(field.Name, args.Value is true ? field.CheckedValue : string.Empty)" disabled="@_running" aria-describedby="@($"help-{field.Name}")" />
+                            <span>@field.Label</span>
+                        }
+                        else if (field.Multiline)
+                        {
+                            @field.Label
+                            <textarea rows="7" value="@GetValue(field.Name)" @oninput="args => SetValue(field.Name, args.Value?.ToString())" placeholder="@field.Placeholder" required="@field.Required" disabled="@_running" spellcheck="false" aria-describedby="@($"help-{field.Name}")"></textarea>
+                        }
+                        else
+                        {
+                            @field.Label
+                            <input value="@GetValue(field.Name)" @oninput="args => SetValue(field.Name, args.Value?.ToString())" placeholder="@field.Placeholder" required="@field.Required" disabled="@_running" aria-describedby="@($"help-{field.Name}")" />
+                        }
+                        @if (field.HelpText is not null) { <small id="@($"help-{field.Name}")" class="muted field-help">@field.HelpText</small> }
+                        @if (_fieldValidation.ErrorFor(field.Name) is { } fieldError) { <small class="error-text" role="alert">@fieldError</small> }
+                    </label>
+                }
+            </div>
+
+            <div class="actions editor-actions submit-actions">
+                <button type="button" class="button primary execute-button" @onclick="ExecuteAsync" disabled="@_running">
+                    <span aria-hidden="true">@(_running ? "◌" : "→")</span>@(_running ? "Выполняется…" : "Получить информацию")
+                </button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_validationError))
+            {
+                <p class="error-text" role="alert">@_validationError</p>
+            }
+        }
+    </section>
+</div>
+
+@if (_result is not null)
+{
+    <section @key="_result.CorrelationId" class="panel response-viewer result-enter">
+        <div class="result-view-switch view-switch" role="group" aria-label="Представление результата">
+            <button type="button" class="@(!_technicalMode ? "active" : null)" aria-pressed="@(!_technicalMode)" @onclick="() => SetMode(false)"><span aria-hidden="true">◫</span> Обычный</button>
+            <button type="button" class="@(_technicalMode ? "active" : null)" aria-pressed="@_technicalMode" @onclick="() => SetMode(true)"><span aria-hidden="true">{ }</span> Технический</button>
+        </div>
+        @if (!_technicalMode && _codeResults is not null)
+        {
+            <CodeInfoResultView Results="_codeResults" Busy="_running" OnCodeSelected="RequestRelatedCodeAsync" />
+        }
+        else if (!_technicalMode && _nationalCatalogResult is not null)
+        {
+            <NationalCatalogProductResultView Result="_nationalCatalogResult" />
+        }
+        else if (!_technicalMode && _documentStatusResults is not null)
+        {
+            <DocumentStatusResultView Results="_documentStatusResults" />
+        }
+        else if (!_technicalMode && _selected?.Id == TrueApiDocumentStatusHandler.OperationId && _result.Success)
+        {
+            <div class="notice error" role="alert">Не удалось прочитать ответ True API. Проверьте технический результат.</div>
+        }
+        else if (!_technicalMode && _result.Error is not null)
+        {
+            <div class="friendly-result-head">
+                <div class="result-icon error-icon" aria-hidden="true">!</div>
+                <div><span class="eyebrow">Проверьте исходные данные</span><h2>Запрос не выполнен</h2></div>
+            </div>
+            <div class="notice error validation-result" role="alert">@_result.Error.Message</div>
+        }
+        else if (!_technicalMode && _result.Success)
+        {
+            <div class="friendly-result-head">
+                <div class="result-icon" aria-hidden="true">✓</div>
+                <div><span class="eyebrow">Результат проверки</span><h2>Информация получена</h2><p class="muted">Данные подготовлены в удобном для чтения виде.</p></div>
+            </div>
+            <div class="result-grid">
+                @foreach (var field in _friendlyResult)
+                {
+                    <article class="result-field"><span>@field.Label</span><strong>@field.Value</strong></article>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="panel-title">
+                <div><span class="eyebrow">Технический результат</span><h2>Фактические HTTP-обмены</h2></div>
+                <div class="actions compact"><button type="button" class="button ghost" @onclick="CopyRequestAsync">Копировать запрос</button><button type="button" class="button ghost" @onclick="CopyResponseAsync">Копировать ответ</button><button type="button" class="button ghost" @onclick="ExecuteAsync" disabled="@_running">Повторить</button></div>
+            </div>
+            <div class="metrics"><span>Method <strong>@_result.HttpMethod</strong></span><span>Status <strong class="@(_result.Success ? "success" : "danger")">@(_result.StatusCode?.ToString() ?? "ERROR")</strong></span><span>Duration <strong>@_result.Duration.TotalMilliseconds.ToString("0") ms</strong></span></div>
+            @if (_result.Error is not null)
+            {
+                <div class="notice error">@_result.Error.Message</div>
+            }
+            @foreach (var exchange in _result.Exchanges ?? [])
+            {
+                <details class="exchange-section" open>
+                    <summary><span>@exchange.HttpMethod @exchange.RequestUrl — HTTP @exchange.StatusCode</span><span class="chevron" aria-hidden="true">⌄</span></summary>
+                    <div class="exchange-content"><h3>Request</h3><pre>@exchange.RequestHeaders</pre>@if (!string.IsNullOrWhiteSpace(exchange.RequestBody)) { <pre>@exchange.RequestBody</pre> }<h3>Response</h3><pre>@exchange.ResponseHeaders</pre><pre>@exchange.ResponseBody</pre></div>
+                </details>
+            }
+        }
+    </section>
+}
+
+@code {
+    private static readonly ApiSystem[] SystemTabOrder = [ApiSystem.TrueApi, ApiSystem.Suz, ApiSystem.NationalCatalog];
+    private IReadOnlyList<ApiOperationDescriptor> _operations = [];
+    private readonly Dictionary<string, string> _values = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<ResultField> _friendlyResult = [];
+    private ApiSystem _system = ApiSystem.TrueApi;
+    private ApiOperationDescriptor? _selected;
+    private ApiExecutionResult? _result;
+    private CodeInfoResults? _codeResults;
+    private NationalCatalogProductResult? _nationalCatalogResult;
+    private DocumentStatusResults? _documentStatusResults;
+    private bool _technicalMode;
+    private bool _running;
+    private bool _favoritesView;
+    private readonly HashSet<string> _favoriteIds = new(StringComparer.OrdinalIgnoreCase);
+    private string? _validationError;
+    private InputValidationResult _fieldValidation = new([]);
+    private bool IsProduction => IntegrationOptions.Value.Mode == CrptIntegrationMode.Production;
+    private string ModeHeadline => IsProduction ? "Промышленный контур." : "Локальная симуляция.";
+    private string ModeDescription => IsProduction
+        ? "True API и Национальный каталог работают с промышленным контуром. СУЗ работает в mock-режиме."
+        : "Все интеграции работают в mock-режиме. Сетевые запросы в Честный Знак не выполняются.";
+    private IEnumerable<ApiOperationDescriptor> VisibleOperations => _favoritesView
+        ? _operations.Where(x => _favoriteIds.Contains(x.Id))
+        : _operations.Where(x => x.System == _system);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _operations = Registry.List();
+        SelectSystem(_system);
+        var profiles = await Profiles.ListAsync();
+        Workbench.ProfileId ??= profiles.FirstOrDefault()?.Id;
+        await LoadFavoritesAsync();
+        Workbench.ProfileChanged += OnProfileChanged;
+        var query = QueryHelpers.ParseQuery(Navigation.ToAbsoluteUri(Navigation.Uri).Query);
+        if (query.TryGetValue("code", out var selectedCode) && !string.IsNullOrWhiteSpace(selectedCode.ToString()))
+            await RequestRelatedCodeAsync(selectedCode.ToString());
+    }
+
+    private void SelectSystem(ApiSystem system)
+    {
+        _favoritesView = false;
+        _system = system;
+        SelectOperation(_operations.FirstOrDefault(x => x.System == system));
+    }
+
+    private void SelectFavorites()
+    {
+        _favoritesView = true;
+        SelectOperation(VisibleOperations.FirstOrDefault());
+    }
+
+    private void SelectOperation(ApiOperationDescriptor? operation)
+    {
+        _selected = operation;
+        _result = null;
+        _codeResults = null;
+        _nationalCatalogResult = null;
+        _documentStatusResults = null;
+        _friendlyResult = [];
+        _validationError = null;
+        _fieldValidation = new([]);
+        _values.Clear();
+        if (operation is null) return;
+        foreach (var field in operation.Fields) _values[field.Name] = string.Empty;
+    }
+
+    private void SetMode(bool technicalMode)
+    {
+        _technicalMode = technicalMode;
+    }
+
+    private async Task RequestRelatedCodeAsync(string code)
+    {
+        if (_running) return;
+        var operation = _operations.FirstOrDefault(x => x.Id == TrueApiCodeInfoHandler.OperationId);
+        if (operation is null) return;
+        if (_selected?.Id != operation.Id) SelectOperation(operation);
+        _favoritesView = false;
+        _system = ApiSystem.TrueApi;
+        SetValue("codes", code);
+        _technicalMode = false;
+        await ExecuteAsync();
+    }
+
+    private string GetValue(string name) => _values.GetValueOrDefault(name, string.Empty);
+    private void SetValue(string name, string? value)
+    {
+        _values[name] = value ?? string.Empty;
+        _fieldValidation = new([]);
+        _validationError = null;
+    }
+    private bool IsFavorite(string operationId) => _favoriteIds.Contains(operationId);
+
+    private async Task ToggleFavoriteAsync(ApiOperationDescriptor operation)
+    {
+        if (Workbench.ProfileId is null) return;
+        var makeFavorite = !_favoriteIds.Contains(operation.Id);
+        await Favorites.SetAsync(Workbench.ProfileId.Value, operation.Id, makeFavorite);
+        Logger.LogInformation("Favorite changed {OperationId} {ProfileId} {IsFavorite}", operation.Id, Workbench.ProfileId.Value, makeFavorite);
+        if (makeFavorite) _favoriteIds.Add(operation.Id);
+        else _favoriteIds.Remove(operation.Id);
+
+        if (_favoritesView && !makeFavorite && _selected?.Id == operation.Id)
+            SelectOperation(VisibleOperations.FirstOrDefault());
+    }
+
+    private async Task LoadFavoritesAsync()
+    {
+        _favoriteIds.Clear();
+        if (Workbench.ProfileId is null) return;
+        foreach (var operationId in await Favorites.ListAsync(Workbench.ProfileId.Value))
+            _favoriteIds.Add(operationId);
+    }
+
+    private void OnProfileChanged(object? sender, Guid? profileId) => _ = InvokeAsync(async () =>
+    {
+        await LoadFavoritesAsync();
+        if (_favoritesView) SelectOperation(VisibleOperations.FirstOrDefault());
+        StateHasChanged();
+    });
+
+    private async Task ExecuteAsync()
+    {
+        if (_running) return;
+        if (_selected is null || Workbench.ProfileId is null)
+        {
+            _validationError = "Выберите профиль и операцию.";
+            return;
+        }
+
+        _fieldValidation = InputValidation.Operation(_selected.Id, _values);
+        if (!_fieldValidation.IsValid)
+        {
+            _validationError = "Исправьте выделенные поля.";
+            return;
+        }
+
+        _validationError = null;
+        _running = true;
+        try
+        {
+            Logger.LogInformation("UI operation started {OperationId} {ProfileId}", _selected.Id, Workbench.ProfileId.Value);
+            _result = await Executor.ExecuteAsync(_selected.Id, _values, Workbench.ProfileId.Value);
+            Logger.LogInformation("UI operation completed {OperationId} {CorrelationId} {Success} {StatusCode} {ElapsedMs}", _selected.Id, _result.CorrelationId, _result.Success, _result.StatusCode, _result.Duration.TotalMilliseconds);
+            _codeResults = _selected.Id == TrueApiCodeInfoHandler.OperationId ? CodeInfoResults.Parse(_result.ResponseBody) : null;
+            _nationalCatalogResult = _selected.Id == NationalCatalogProductHandler.OperationId && _result.Success
+                ? JsonSerializer.Deserialize<NationalCatalogProductResult>(_result.ResponseBody ?? "{}", new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                : null;
+            _documentStatusResults = _selected.Id == TrueApiDocumentStatusHandler.OperationId && _result.Success
+                ? DocumentStatusResults.Parse(_result.ResponseBody) : null;
+            _friendlyResult = BuildFriendlyResult(_result.ResponseBody);
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError("UI operation failed {OperationId} {ExceptionType}", _selected.Id, exception.GetType().Name);
+            throw;
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    private static IReadOnlyList<ResultField> BuildFriendlyResult(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return [];
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return [];
+            return document.RootElement.EnumerateObject()
+                .Where(property => property.Name is not "mock" and not "correlationId")
+                .Select(property => new ResultField(FieldLabel(property.Name), ElementText(property.Value)))
+                .ToArray();
+        }
+        catch (JsonException)
+        {
+            return [new ResultField("Ответ", body)];
+        }
+    }
+
+    private static string FieldLabel(string name) => name switch
+    {
+        "id" => "Код / идентификатор",
+        "status" => "Статус",
+        "system" => "Система",
+        "message" => "Комментарий",
+        _ => name
+    };
+
+    private static string ElementText(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.String => element.GetString() ?? "—",
+        JsonValueKind.True => "Да",
+        JsonValueKind.False => "Нет",
+        JsonValueKind.Null => "—",
+        _ => element.GetRawText()
+    };
+
+    private Task CopyRequestAsync() => JavaScript.InvokeVoidAsync("crptWorkbench.copyText", $"{_result?.HttpMethod} {_result?.RequestUrl}\n{_result?.RequestHeaders}\n\n{_result?.RequestBody}").AsTask();
+    private Task CopyResponseAsync() => JavaScript.InvokeVoidAsync("crptWorkbench.copyText", $"{_result?.ResponseHeaders}\n\n{_result?.ResponseBody}").AsTask();
+    private static string SystemName(ApiSystem system) => system switch { ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", _ => "СУЗ" };
+
+    public void Dispose() => Workbench.ProfileChanged -= OnProfileChanged;
+
+    private sealed record ResultField(string Label, string Value);
+}
+
+

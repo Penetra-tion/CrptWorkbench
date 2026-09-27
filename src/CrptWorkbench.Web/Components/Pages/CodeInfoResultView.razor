@@ -1,0 +1,187 @@
+@using System.Globalization
+
+<div class="panel-title">
+    <div><span class="eyebrow">Результат проверки кодов</span>
+        <h2>@(Results.FoundCount == 0 ? "Коды не найдены" : Results.ErrorCount > 0 ? "Информация получена частично" : "Информация получена")</h2>
+    </div>
+</div>
+<div class="metrics" role="status">
+    <span>Всего <strong>@Results.Items.Count</strong></span>
+    <span>Найдено <strong>@Results.FoundCount</strong></span>
+    <span class="@(Results.ErrorCount > 0 ? "metric-errors" : null)">@if (Results.ErrorCount > 0) { <span aria-hidden="true">! </span> }Ошибок <strong>@Results.ErrorCount</strong></span>
+</div>
+<div class="code-result-list">
+    @foreach (var item in Results.Items)
+    {
+        var info = item.CisInfo;
+        var found = CodeInfoResults.IsFound(item);
+        var appearance = ResultStatusAppearance.ForCode(item);
+        var packageCode = CodeInfoResults.PackageTypeCode(info);
+        <article class="code-result-card">
+            <header class="code-card-head">
+                <div class="code-card-title">
+                    <span class="package-label">@CodeInfoResults.PackageTypeLabel(info) @if (!string.IsNullOrWhiteSpace(packageCode)) { <small>@packageCode</small> }</span>
+                    <h3>@(found ? ProductTitle(info) : "Сведения о коде недоступны")</h3>
+                    @if (found && OmitsProductDetails(info) && string.IsNullOrWhiteSpace(info?.ProductName))
+                    {
+                        <p class="muted code-product-note">Название товара: @ProductValue(info)</p>
+                    }
+                </div>
+                <span class="outcome-badge @appearance.CssClass"><span class="outcome-icon" aria-hidden="true">@appearance.Icon</span>@(found ? CodeInfoResults.StatusLabel(info?.Status) : string.IsNullOrWhiteSpace(item.ErrorCode) ? "Ошибка" : $"Ошибка {item.ErrorCode}")</span>
+            </header>
+            <div class="requested-code"><span class="eyebrow">Код маркировки</span><code>@(info?.RequestedCis ?? info?.Cis ?? "—")</code></div>
+            @if (!found)
+            {
+                <div class="result-errors tone-error"><span aria-hidden="true">! </span>@(item.ErrorMessage ?? "Сведения о коде отсутствуют")</div>
+            }
+            @if (found && info is not null)
+            {
+                <dl class="code-primary-fields">
+                    <div><dt>GTIN</dt><dd>@GtinValue(info)</dd></div>
+                    <div><dt>Владелец</dt><dd>@(info.OwnerName ?? "—") @if (info.OwnerInn is not null) { <small class="muted">ИНН @info.OwnerInn</small> }</dd></div>
+                </dl>
+                <details class="code-details" open="@(Results.Items.Count == 1)">
+                    <summary class="disclosure-toggle">Подробные сведения</summary>
+                    <div class="disclosure-content">
+                        @if (!string.IsNullOrWhiteSpace(info.Cis) && info.Cis != info.RequestedCis)
+                        {
+                            <div class="requested-code"><span class="eyebrow">Код из ответа</span><code>@info.Cis</code></div>
+                        }
+                        <div class="code-detail-sections">
+                        <section class="code-detail-section">
+                            <h4>Даты и сроки</h4>
+                            <dl class="code-detail-grid">
+                                <div class="detail-field"><dt>Дата нанесения</dt><dd>@ApplicationDateValue(info)</dd></div>
+                                <div class="detail-field"><dt>Дата эмиссии</dt><dd>@FormatDate(info.EmissionDate)</dd></div>
+                                <div class="detail-field">
+                                    <dt>Товарная группа</dt>
+                                    <dd>@(info.ProductGroup ?? "—")
+                                        @if (info.ProductGroupId.HasValue) { <small class="muted">ID @info.ProductGroupId</small> }
+                                    </dd>
+                                </div>
+                                <div class="detail-field detail-field-wide">
+                                    <dt>Срок годности</dt>
+                                    <dd>
+                                        @if (info.Expirations is { Count: > 0 })
+                                        {
+                                            <div class="expiration-list">
+                                                @foreach (var expiration in info.Expirations)
+                                                {
+                                                    <article class="detail-card">
+                                                        <strong>@FormatDate(expiration.ExpirationStorageDate)</strong>
+                                                        @if (expiration.StorageConditionId.HasValue) { <span>Условие хранения: @expiration.StorageConditionId</span> }
+                                                        @if (!string.IsNullOrWhiteSpace(expiration.StorageConditionName)) { <span>@expiration.StorageConditionName</span> }
+                                                    </article>
+                                                }
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            @FormatDate(info.ExpirationDate)
+                                        }
+                                    </dd>
+                                </div>
+                            </dl>
+                        </section>
+                        <section class="code-detail-section">
+                            <h4>Разрешительные документы</h4>
+                            @if (info.CertDoc is { Count: > 0 })
+                            {
+                                <div class="permit-list">
+                                    @foreach (var document in info.CertDoc)
+                                    {
+                                        <article class="detail-card permit-document">
+                                            <strong>@CodeInfoResults.PermitDocumentTypeLabel(document.Type)</strong>
+                                            @if (!string.IsNullOrWhiteSpace(document.Type)) { <span class="muted">@document.Type</span> }
+                                            @if (!string.IsNullOrWhiteSpace(document.Number)) { <span>Номер: @document.Number</span> }
+                                            @if (!string.IsNullOrWhiteSpace(document.Date)) { <span>Дата: @FormatPermitDate(document.Date)</span> }
+                                            @if (!string.IsNullOrWhiteSpace(document.WellNumber)) { <span>Скважина: @document.WellNumber</span> }
+                                            @if (document.Indx.HasValue) { <span>Индекс: @document.Indx</span> }
+                                            @if (document.StatusGroup.HasValue) { <span>@CodeInfoResults.PermitStatusGroupLabel(document.StatusGroup) · группа @document.StatusGroup</span> }
+                                        </article>
+                                    }
+                                </div>
+                            }
+                            else if (info.CertDocRequirementDetails is not null)
+                            {
+                                <div class="detail-card">
+                                    <strong>Документы отсутствуют</strong>
+                                    <span>@(info.CertDocRequirementDetails.NotRequiredReason ?? "Основание не указано")</span>
+                                    @if (info.CertDocRequirementDetails.IsRequired.HasValue)
+                                    {
+                                        <span>Наличие причины отсутствия: @(info.CertDocRequirementDetails.IsRequired.Value ? "да" : "нет")</span>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <span>—</span>
+                            }
+                        </section>
+                        <section class="code-detail-section code-relations">
+                            <h4>Состав и родительская упаковка</h4>
+                            <dl class="code-detail-grid">
+                                <div class="detail-field detail-field-wide">
+                                    <dt>Вложения</dt>
+                                    <dd>
+                                        @if (info.Child is { Count: > 0 })
+                                        {
+                                            <ul class="code-link-list">
+                                                @foreach (var child in info.Child) { <li><button type="button" class="related-code-link" disabled="@Busy" title="Запросить сведения по коду" @onclick="() => OnCodeSelected.InvokeAsync(child)"><code>@child</code></button></li> }
+                                            </ul>
+                                        }
+                                        else
+                                        {
+                                            <span>—</span>
+                                        }
+                                    </dd>
+                                </div>
+                                <div class="detail-field detail-field-wide"><dt>Родительская упаковка</dt><dd>@if (string.IsNullOrWhiteSpace(info.Parent)) { <span>—</span> } else { <button type="button" class="related-code-link" disabled="@Busy" title="Запросить сведения по коду" @onclick="() => OnCodeSelected.InvokeAsync(info.Parent)"><code>@info.Parent</code></button> }</dd></div>
+                            </dl>
+                        </section>
+                        </div>
+                    </div>
+                </details>
+            }
+        </article>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CodeInfoResults Results { get; set; } = new([]);
+    [Parameter] public EventCallback<string> OnCodeSelected { get; set; }
+    [Parameter] public bool Busy { get; set; }
+
+    private static bool OmitsProductDetails(CisInfo? info) => CodeInfoResults.PackageTypeCode(info) is "BOX" or "ATK";
+
+    private static string ProductTitle(CisInfo? info) => !string.IsNullOrWhiteSpace(info?.ProductName)
+        ? info.ProductName
+        : OmitsProductDetails(info) ? CodeInfoResults.PackageTypeLabel(info) : "Название товара не указано";
+
+    private static string ProductValue(CisInfo? info) => !string.IsNullOrWhiteSpace(info?.ProductName)
+        ? info.ProductName
+        : OmitsProductDetails(info) ? "Не возвращается для этого типа" : "—";
+
+    private static string GtinValue(CisInfo? info) => !string.IsNullOrWhiteSpace(info?.Gtin)
+        ? info.Gtin
+        : OmitsProductDetails(info) ? "Не возвращается для этого типа" : "—";
+
+    private static string ApplicationDateValue(CisInfo info) => info.ApplicationDate.HasValue
+        ? FormatDate(info.ApplicationDate)
+        : OmitsProductDetails(info) ? "Не возвращается для этого типа" : "—";
+
+    private static string FormatDate(DateTimeOffset? value) => value.HasValue
+        ? value.Value.ToUniversalTime().ToString("dd.MM.yyyy HH:mm 'UTC'", CultureInfo.InvariantCulture)
+        : "—";
+
+    private static string FormatPermitDate(string value)
+    {
+        if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var timestamp))
+            return timestamp.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
+        if (DateOnly.TryParseExact(value, ["yyyy.MM.dd", "yyyy-MM-dd"], CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            return date.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
+        return value;
+    }
+}
+
+

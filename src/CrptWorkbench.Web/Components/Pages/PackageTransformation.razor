@@ -1,0 +1,291 @@
+@page "/package-transformation"
+@implements IAsyncDisposable
+@using System.Text
+@inject PackageTransformationService Transformations
+@inject PackageDocumentTracker TransformationTracker
+@inject FavoriteProductGroupService FavoriteGroups
+@inject WorkbenchContext Workbench
+@inject IJSRuntime JavaScript
+
+<PageTitle>Трансформация упаковок — CRPT Workbench</PageTitle>
+<div class="page-heading"><div><span class="eyebrow">Специальные возможности</span><h1>Трансформация упаковок</h1></div></div>
+
+<div class="package-page">
+<section class="panel form-section">
+    <h2>Подготовка</h2>
+    <p class="muted">В каждой строке укажите код вложения и код упаковки через пробел или табуляцию. Одна упаковка создаёт один документ.</p>
+    <div class="form-grid">
+        <label>Действие<select @bind="_action" disabled="@_busy"><option value="ADDING">Вложение</option><option value="REMOVING">Изъятие</option></select></label>
+        <div class="product-group-field">
+            <span class="product-group-head">
+                <label for="package-product-group">Товарная группа</label>
+                <span class="package-group-filter" role="group" aria-label="Фильтр товарных групп">
+                    <button type="button" class="@(!_favoriteGroupsOnly ? "active" : null)" @onclick="() => SetFavoriteGroupsOnlyAsync(false)" disabled="@_busy">Все</button>
+                    <button type="button" class="@(_favoriteGroupsOnly ? "active" : null)" @onclick="() => SetFavoriteGroupsOnlyAsync(true)" disabled="@(_busy || _favoriteGroupCodes.Count == 0)">Избранные</button>
+                </span>
+            </span>
+            <div class="product-group-picker">
+                <select id="package-product-group" value="@_group" @onchange="ChangeGroup" disabled="@_busy">
+                    @foreach (var group in VisibleGroups) { <option value="@group.Code">@group.Name</option> }
+                </select>
+                <button type="button" class="favorite-toggle product-group-favorite @(IsFavoriteGroup(_group) ? "active" : null)" @onclick="ToggleFavoriteGroupAsync" disabled="@(_busy || Workbench.ProfileId is null)" aria-label="@(IsFavoriteGroup(_group) ? "Удалить товарную группу из избранного" : "Добавить товарную группу в избранное")" title="@(IsFavoriteGroup(_group) ? "Удалить из избранного" : "Добавить в избранное")">@(IsFavoriteGroup(_group) ? "★" : "☆")</button>
+            </div>
+        </div>
+    </div>
+    <div id="package-file-drop" class="package-drop">
+        <span class="package-drop-title">Перетащите текстовый файл сюда</span>
+        <label class="button ghost package-file-button" for="package-file-input">Выбрать TXT-файл</label>
+        <InputFile id="package-file-input" OnChange="ReadFileAsync" accept=".txt,text/plain" disabled="@_busy" />
+    </div>
+    <label class="package-text-label" for="package-text-input">Вставьте список кодов</label>
+    <p class="muted package-input-help">Подойдёт текст из блокнота или две колонки из Excel. Разделяйте коды пробелом или табуляцией, каждую пару начинайте с новой строки.</p>
+    <textarea id="package-text-input" rows="7" value="@_text" @oninput="TextChanged" disabled="@_busy" spellcheck="false" placeholder="Код вложения    Код упаковки"></textarea>
+    <div class="actions"><button type="button" class="button ghost" @onclick="Preview" disabled="@_busy">Проверить строки</button></div>
+    @if (_message is not null) { <p class="notice package-message @(_preview?.Errors.Count > 0 ? "error" : "")" role="status">@_message</p> }
+</section>
+
+@if (_preview is not null)
+{
+    <section class="panel">
+        <h2>Предпросмотр: @_preview.Rows.Count вложений, @_preview.PackageCount упаковок</h2>
+        @if (_preview.Errors.Count > 0) { <div class="notice error" role="alert">@foreach (var error in _preview.Errors) { <p>@error</p> }</div> }
+        @if (_preview.Rows.Count > 0)
+        {
+            <div class="preview-toolbar">
+                <span class="muted">@PreviewSummary</span>
+                @if (CanCollapsePreview)
+                {
+                    <button type="button" class="disclosure-toggle preview-disclosure" aria-expanded="@_previewExpanded" @onclick="TogglePreviewRows">
+                        @(_previewExpanded ? "Скрыть строки" : $"Показать все {_preview.Rows.Count}")
+                    </button>
+                }
+            </div>
+            <div @ref="_previewTable" class="table-wrap package-preview-table"><table><thead><tr><th>Строка</th><th>Вложение</th><th>@(_action == "ADDING" ? "Куда добавить" : "Откуда изъять")</th></tr></thead><tbody>
+                @foreach (var row in PreviewRows) { <tr><td>@row.Line</td><td><code>@row.Item</code></td><td><code>@row.Package</code></td></tr> }
+            </tbody></table></div>
+        }
+        <div class="actions submit-actions">
+            <button type="button" class="button primary" @onclick="SubmitAsync" disabled="@(_busy || _preview.Errors.Count > 0 || _preview.Rows.Count == 0 || Workbench.ProfileId is null)">@(_busy ? "Отправляем…" : "Подписать и отправить")</button>
+        </div>
+    </section>
+}
+
+<section class="panel">
+    <div class="panel-title"><h2>Отправленные документы</h2><button type="button" class="button ghost" @onclick="LoadAsync">Обновить</button></div>
+    @if (Workbench.ProfileId is null) { <p>Выберите профиль.</p> }
+    else if (_documents.Count == 0) { <p class="muted">Документов пока нет.</p> }
+    else
+    {
+        <div class="table-wrap"><table><thead><tr><th>Упаковка</th><th>GUID</th><th>Состояние</th><th>Последняя проверка</th><th>Следующая проверка</th><th></th></tr></thead><tbody>
+            @foreach (var doc in _documents)
+            {
+                <tr><td><code>@doc.PackageCode</code><br /><small>@doc.ItemCount вложений · @(doc.Action == "ADDING" ? "Добавление" : "Изъятие")</small></td>
+                    <td><code>@(doc.DocumentId ?? "—")</code></td>
+                    <td>@StateLabel(doc)@if (!string.IsNullOrWhiteSpace(doc.RemoteStatus)) { <br /><small>@DocumentStatusResults.Status(doc.RemoteStatus)</small> }@if (!string.IsNullOrWhiteSpace(doc.Error)) { <br /><small class="error-text">@doc.Error</small> }</td>
+                    <td>@Date(doc.LastCheckedAtUnixMs)</td>
+                    <td>@Date(doc.NextCheckAtUnixMs)</td>
+                    <td>@if (doc.DocumentId is not null && doc.State is "Paused" or "Tracking") { <button type="button" class="button ghost" @onclick="() => ContinueAsync(doc.Id, doc.State)" disabled="@_busy">@(doc.State == "Paused" ? "Возобновить на 24 часа" : "Проверить сейчас")</button> }</td></tr>
+            }
+        </tbody></table></div>
+    }
+</section>
+
+</div>
+
+@code {
+    private const string FavoriteGroupsOnlyStorageKey = "crpt-workbench-package-transformation-favorite-groups-only";
+    private const int PreviewRowLimit = 10;
+    private static readonly (string Code, string Name)[] Groups =
+    [
+        ("lp", "Одежда и бельё"), ("shoes", "Обувь"), ("perfumery", "Парфюмерия"), ("tires", "Шины"),
+        ("electronics", "Фотокамеры"), ("milk", "Молочная продукция"), ("bicycle", "Велосипеды"),
+        ("wheelchairs", "Медицинские изделия"), ("alcohol", "Слабоалкогольные напитки"), ("water", "Вода"),
+        ("beer", "Пиво"), ("bio", "БАД"), ("antiseptic", "Антисептики"), ("petfood", "Корма для животных"),
+        ("seafood", "Морепродукты"), ("nabeer", "Безалкогольное пиво"), ("softdrinks", "Соки и напитки"),
+        ("vetpharma", "Ветеринарные препараты"), ("toys", "Игры и игрушки"), ("radio", "Радиоэлектроника"),
+        ("conserve", "Консервы"), ("vegetableoil", "Растительные масла"), ("opticfiber", "Оптоволокно"),
+        ("chemistry", "Косметика и бытовая химия"), ("books", "Печатная продукция"), ("grocery", "Бакалея"),
+        ("construction", "Стройматериалы"), ("fire", "Пиротехника"), ("heater", "Отопительные приборы"),
+        ("cableraw", "Кабели"), ("autofluids", "Моторные масла"), ("polymer", "Полимерные трубы"),
+        ("sweets", "Сладости"), ("carparts", "Автозапчасти")
+    ];
+    private string _action = "ADDING";
+    private string _group = "milk";
+    private string _text = string.Empty;
+    private bool _busy;
+    private bool _favoriteGroupsOnly;
+    private bool _previewExpanded;
+    private bool _previewAnimating;
+    private bool _animatePreviewAfterRender;
+    private bool _resetPreviewAfterRender;
+    private ElementReference _previewTable;
+    private string? _message;
+    private TransformationPreview? _preview;
+    private IReadOnlyList<PackageDocument> _documents = [];
+    private readonly HashSet<string> _favoriteGroupCodes = new(StringComparer.Ordinal);
+    private IJSObjectReference? _dropModule;
+    private readonly CancellationTokenSource _refreshCancellation = new();
+    private bool CanCollapsePreview => _preview is { Rows.Count: > PreviewRowLimit };
+    private IEnumerable<TransformationRow> PreviewRows =>
+        _preview is null ? [] : CanCollapsePreview && !_previewExpanded ? _preview.Rows.Take(PreviewRowLimit) : _preview.Rows;
+    private string PreviewSummary => _preview is null || !CanCollapsePreview || _previewExpanded
+        ? "Список строк для отправки."
+        : $"Показаны первые {PreviewRowLimit} строк из {_preview.Rows.Count}.";
+    private IEnumerable<(string Code, string Name)> VisibleGroups =>
+        _favoriteGroupsOnly && _favoriteGroupCodes.Count > 0
+            ? Groups.Where(x => _favoriteGroupCodes.Contains(x.Code))
+            : Groups;
+
+    protected override void OnInitialized() => Workbench.ProfileChanged += ProfileChanged;
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_dropModule is not null && _animatePreviewAfterRender)
+        {
+            _animatePreviewAfterRender = false;
+            try { await _dropModule.InvokeVoidAsync("animatePreview", _previewTable, true, PreviewRowLimit); }
+            finally { _previewAnimating = false; }
+        }
+        if (_dropModule is not null && _resetPreviewAfterRender)
+        {
+            _resetPreviewAfterRender = false;
+            await _dropModule.InvokeVoidAsync("resetPreview", _previewTable);
+        }
+        if (!firstRender) return;
+        _favoriteGroupsOnly = await JavaScript.InvokeAsync<bool>("crptWorkbench.getLocalFlag", FavoriteGroupsOnlyStorageKey);
+        _dropModule = await JavaScript.InvokeAsync<IJSObjectReference>("import", "./js/package-drop.js");
+        await _dropModule.InvokeVoidAsync("attach", "package-file-drop", "package-file-input");
+        await LoadFavoriteGroupsAsync();
+        await LoadAsync();
+        StateHasChanged();
+        _ = RefreshWhileOpenAsync();
+    }
+    private void ProfileChanged(object? sender, Guid? id) => _ = InvokeAsync(async () => { await LoadFavoriteGroupsAsync(); await LoadAsync(); StateHasChanged(); });
+    private void TextChanged(ChangeEventArgs e) { _text = e.Value?.ToString() ?? ""; _preview = null; _previewExpanded = false; _message = null; }
+    private void ChangeGroup(ChangeEventArgs e) => _group = e.Value?.ToString() ?? _group;
+    private bool IsFavoriteGroup(string groupCode) => _favoriteGroupCodes.Contains(groupCode);
+    private async Task SetFavoriteGroupsOnlyAsync(bool favoriteOnly)
+    {
+        _favoriteGroupsOnly = favoriteOnly && _favoriteGroupCodes.Count > 0;
+        if (_favoriteGroupsOnly && !_favoriteGroupCodes.Contains(_group))
+            _group = VisibleGroups.FirstOrDefault().Code ?? _group;
+        if (!_favoriteGroupsOnly && _favoriteGroupCodes.Contains(_group))
+            _group = Groups.FirstOrDefault(x => !_favoriteGroupCodes.Contains(x.Code)).Code ?? _group;
+        await JavaScript.InvokeVoidAsync("crptWorkbench.setLocalFlag", FavoriteGroupsOnlyStorageKey, _favoriteGroupsOnly);
+    }
+    private async Task ToggleFavoriteGroupAsync()
+    {
+        if (Workbench.ProfileId is null) return;
+        var makeFavorite = !_favoriteGroupCodes.Contains(_group);
+        await FavoriteGroups.SetAsync(Workbench.ProfileId.Value, _group, makeFavorite);
+        if (makeFavorite) _favoriteGroupCodes.Add(_group);
+        else _favoriteGroupCodes.Remove(_group);
+        if (_favoriteGroupsOnly && _favoriteGroupCodes.Count == 0)
+        {
+            _favoriteGroupsOnly = false;
+            await JavaScript.InvokeVoidAsync("crptWorkbench.setLocalFlag", FavoriteGroupsOnlyStorageKey, false);
+        }
+    }
+    private async Task LoadFavoriteGroupsAsync()
+    {
+        _favoriteGroupCodes.Clear();
+        if (Workbench.ProfileId is null) { _favoriteGroupsOnly = false; return; }
+        foreach (var groupCode in await FavoriteGroups.ListAsync(Workbench.ProfileId.Value))
+            if (Groups.Any(x => x.Code == groupCode)) _favoriteGroupCodes.Add(groupCode);
+        if (_favoriteGroupsOnly && _favoriteGroupCodes.Count == 0)
+            _favoriteGroupsOnly = false;
+        if (_favoriteGroupsOnly && !_favoriteGroupCodes.Contains(_group))
+            _group = VisibleGroups.FirstOrDefault().Code ?? _group;
+    }
+    private async Task RefreshWhileOpenAsync()
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+            while (await timer.WaitForNextTickAsync(_refreshCancellation.Token))
+                await InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+        }
+        catch (OperationCanceledException) { }
+    }
+    private async Task ReadFileAsync(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            await using var stream = e.File.OpenReadStream(1_000_000);
+            using var reader = new StreamReader(stream, new UTF8Encoding(false, true));
+            _text = await reader.ReadToEndAsync();
+            Preview();
+        }
+        catch (Exception) { _message = "Не удалось прочитать TXT. Нужен файл UTF-8 размером до 1 МБ."; _preview = null; }
+    }
+    private void Preview() { _preview = PackageTransformationService.Parse(_text); _previewExpanded = false; _message = _preview.Errors.Count == 0 ? "Строки проверены. Можно отправлять документы." : "Исправьте ошибки в файле или поле ввода."; }
+    private async Task TogglePreviewRows()
+    {
+        if (_previewAnimating || _dropModule is null) return;
+        _previewAnimating = true;
+        if (_previewExpanded)
+        {
+            try
+            {
+                await _dropModule.InvokeVoidAsync("animatePreview", _previewTable, false, PreviewRowLimit);
+                _previewExpanded = false;
+                _resetPreviewAfterRender = true;
+            }
+            finally { _previewAnimating = false; }
+        }
+        else
+        {
+            await _dropModule.InvokeVoidAsync("freezePreview", _previewTable);
+            _previewExpanded = true;
+            _animatePreviewAfterRender = true;
+        }
+    }
+    private async Task SubmitAsync()
+    {
+        if (_preview is null || _preview.Errors.Count > 0 || Workbench.ProfileId is not { } profileId) return;
+        _busy = true;
+        try
+        {
+            var sent = await Transformations.SubmitAsync(profileId, _group, _action, _preview.Rows);
+            _message = $"Создано заданий: {sent.Count}. Статусы обновляются автоматически.";
+            _preview = null;
+            await LoadAsync();
+        }
+        catch (Exception e) { _message = $"Отправка прервана: {e.Message}"; await LoadAsync(); }
+        finally { _busy = false; }
+    }
+    private async Task LoadAsync() => _documents = Workbench.ProfileId is { } id ? await Transformations.ListAsync(id) : [];
+    private async Task ContinueAsync(Guid id, string state)
+    {
+        if (Workbench.ProfileId is not { } profileId) return;
+        _busy = true;
+        try
+        {
+            if (state == "Paused") await Transformations.ResumeAsync(profileId, id);
+            else await Transformations.CheckNowAsync(profileId, id);
+            await TransformationTracker.PollDueAsync();
+            _message = state == "Paused" ? "Отслеживание возобновлено." : "Проверка выполнена.";
+        }
+        catch (Exception e)
+        {
+            _message = $"Проверка не выполнена: {e.Message}";
+        }
+        finally
+        {
+            await LoadAsync();
+            _busy = false;
+        }
+    }
+    private static string StateLabel(PackageDocument x) => x.State switch
+    {
+        "Tracking" => "Проверяется", "Finished" => "Обработка завершена", "Paused" => "Отслеживание приостановлено",
+        "Unknown" or "Sending" => "Результат отправки неизвестен", "Rejected" => "Не отправлен", _ => x.State
+    };
+    private static string Date(long? unixMs) => unixMs is null ? "—" : DateTimeOffset.FromUnixTimeMilliseconds(unixMs.Value).ToLocalTime().ToString("dd.MM.yyyy HH:mm");
+    public async ValueTask DisposeAsync()
+    {
+        Workbench.ProfileChanged -= ProfileChanged;
+        await _refreshCancellation.CancelAsync();
+        _refreshCancellation.Dispose();
+        if (_dropModule is not null) { try { await _dropModule.DisposeAsync(); } catch (JSDisconnectedException) { } }
+    }
+}

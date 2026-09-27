@@ -1,0 +1,37 @@
+﻿<script type="module" src="@Assets["Components/Layout/ReconnectModal.razor.js"]"></script>
+
+<dialog id="components-reconnect-modal" data-nosnippet>
+    <div class="components-reconnect-container">
+        <span class="reconnect-eyebrow">CRPT Workbench</span>
+        <div class="components-rejoining-animation" aria-hidden="true">
+            <div></div>
+            <div></div>
+        </div>
+        <p class="components-reconnect-first-attempt-visible">
+            <strong>Соединение потеряно</strong>
+            <span>Пытаемся восстановить подключение…</span>
+        </p>
+        <p class="components-reconnect-repeated-attempt-visible">
+            <strong>Сервер пока недоступен</strong>
+            <span>Следующая попытка через <span id="components-seconds-to-next-attempt"></span> сек.</span>
+        </p>
+        <p class="components-reconnect-failed-visible">
+            <strong>Не удалось подключиться</strong>
+            <span>Проверьте соединение и попробуйте ещё раз.</span>
+        </p>
+        <button id="components-reconnect-button" class="components-reconnect-failed-visible">
+            Повторить
+        </button>
+        <p class="components-pause-visible">
+            <strong>Сеанс приостановлен</strong>
+            <span>Продолжите работу, когда будете готовы.</span>
+        </p>
+        <p class="components-resume-failed-visible">
+            <strong>Не удалось продолжить сеанс</strong>
+            <span>Попробуйте ещё раз или обновите страницу.</span>
+        </p>
+        <button id="components-resume-button" class="components-pause-visible components-resume-failed-visible">
+            Продолжить
+        </button>
+    </div>
+</dialog>

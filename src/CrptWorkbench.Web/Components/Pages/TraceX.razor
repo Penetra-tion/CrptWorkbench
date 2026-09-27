@@ -1,0 +1,55 @@
+@page "/tracex"
+@implements IDisposable
+@inject ProfileService Profiles
+@inject WorkbenchContext Workbench
+
+<PageTitle>TraceX — CRPT Workbench</PageTitle>
+
+<div class="page-heading">
+    <div><span class="eyebrow">Головное ПО</span><h1>TraceX</h1></div>
+    <a class="button ghost" href="/settings">Настроить подключение</a>
+</div>
+
+<div class="notice production-notice"><strong>Раздел в разработке.</strong> Здесь появятся сценарии взаимодействия с базой головного ПО.</div>
+
+<div class="placeholder-grid">
+    <section class="panel placeholder-card">
+        <span class="eyebrow">Текущий профиль</span>
+        <h2>@(_profile?.Name ?? "Профиль не выбран")</h2>
+        <p class="muted">Подключение относится только к выбранному профилю организации.</p>
+    </section>
+    <section class="panel placeholder-card">
+        <span class="eyebrow">База данных</span>
+        <h2>@ProviderName</h2>
+        <p class="connection-state @(_state?.Configured == true ? "success" : "warning")">@ConnectionState</p>
+    </section>
+</div>
+
+<section class="panel future-feature">
+    <span class="future-icon" aria-hidden="true">↗</span>
+    <div><h2>Интеграция будет добавлена позднее</h2><p class="muted">Страница не подключается к базе автоматически и пока не читает данные TraceX.</p></div>
+</section>
+
+@code {
+    private CrptProfile? _profile;
+    private TraceXConnectionState? _state;
+    private string ProviderName => _state?.Provider == TraceXDatabaseProvider.PostgreSql ? "PostgreSQL" : "MS SQL";
+    private string ConnectionState => _state?.Configured == true ? "Строка подключения сохранена защищённо" : "Подключение не настроено";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Workbench.ProfileChanged += OnProfileChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var profiles = await Profiles.ListAsync();
+        Workbench.ProfileId ??= profiles.FirstOrDefault()?.Id;
+        _profile = profiles.FirstOrDefault(x => x.Id == Workbench.ProfileId);
+        _state = _profile is null ? null : await Profiles.GetTraceXConnectionStateAsync(_profile.Id);
+    }
+
+    private void OnProfileChanged(object? sender, Guid? profileId) => _ = InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+    public void Dispose() => Workbench.ProfileChanged -= OnProfileChanged;
+}

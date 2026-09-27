@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.0" />
+    <PackageReference Include="xunit.v3" Version="4.0.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CrptWorkbench.Web\CrptWorkbench.Web.csproj" />
+    <ProjectReference Include="..\..\src\CrptWorkbench.Infrastructure\CrptWorkbench.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\CrptWorkbench.Application\CrptWorkbench.Application.csproj" />
+    <ProjectReference Include="..\..\src\CrptWorkbench.Clients\CrptWorkbench.Clients.csproj" />
+    <ProjectReference Include="..\..\src\CrptWorkbench.Domain\CrptWorkbench.Domain.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\src\CrptWorkbench.Web\appsettings.json" Link="logging-appsettings.json" CopyToOutputDirectory="Always" />
+  </ItemGroup>
+</Project>
+
+

@@ -1,0 +1,57 @@
+@using CrptWorkbench.Application
+
+@if (Result is not null)
+{
+    var visiblePackages = VisiblePackages(Result);
+    <div class="friendly-result-head">
+        <div class="result-icon" aria-hidden="true">✓</div>
+        <div><span class="eyebrow">Собственная карточка НК</span><h2>@Result.ProductName</h2><p class="muted">GTIN @Result.Gtin</p></div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Result.Warning))
+    {
+        <div class="notice error" role="status">@Result.Warning</div>
+    }
+
+    <div class="result-grid">
+        <article class="result-field"><span>Наименование продукта</span><strong>@Result.ProductName</strong></article>
+        <article class="result-field"><span>GTIN</span><strong>@Result.Gtin</strong></article>
+        <article class="result-field"><span>ТН ВЭД</span><strong>@Result.TnVed</strong></article>
+        <article class="result-field"><span>Товарная группа</span><strong>@Result.ProductGroup</strong></article>
+        <article class="result-field"><span>Статус карточки</span><strong>@Result.CardStatus</strong></article>
+    </div>
+
+    <h3>GTIN упаковок</h3>
+    @if (visiblePackages.Count == 0)
+    {
+        <div class="empty compact-empty">Упаковки не указаны.</div>
+    }
+    else
+    {
+        <div class="table-wrap"><table><thead><tr><th>GTIN</th><th>Уровень</th><th>Количество единиц</th></tr></thead>
+        <tbody>@foreach (var package in visiblePackages) { <tr><td>@package.Gtin</td><td>@package.Level</td><td>@package.Multiplier</td></tr> }</tbody></table></div>
+    }
+
+    <h3>Разрешительные документы</h3>
+    @if (Result.Documents.Count == 0)
+    {
+        <div class="empty compact-empty">Разрешительные документы не указаны.</div>
+    }
+    else
+    {
+        <div class="table-wrap"><table><thead><tr><th>Тип</th><th>Номер</th><th>Дата оформления</th></tr></thead>
+        <tbody>@foreach (var document in Result.Documents) { <tr><td>@document.Type</td><td>@document.Number</td><td>@(document.Date ?? "Не указано")</td></tr> }</tbody></table></div>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public NationalCatalogProductResult? Result { get; set; }
+
+    private static IReadOnlyList<NationalCatalogPackage> VisiblePackages(NationalCatalogProductResult result) =>
+        result.Packages
+            .Where(package => !IsRequestedTradeUnit(result.Gtin, package))
+            .ToArray();
+
+    private static bool IsRequestedTradeUnit(string gtin, NationalCatalogPackage package) =>
+        package.Multiplier == 1 && string.Equals(package.Gtin, gtin, StringComparison.OrdinalIgnoreCase);
+}

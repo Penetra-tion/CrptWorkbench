@@ -1,0 +1,305 @@
+@inject ILogger<Settings> Logger
+@page "/settings"
+@inject ProfileService ProfileService
+@inject WorkbenchContext Workbench
+@inject IOptions<CrptIntegrationOptions> IntegrationOptions
+
+<PageTitle>Настройки — CRPT Workbench</PageTitle>
+
+<div class="page-heading">
+    <div><span class="eyebrow">Конфигурация</span><h1>Настройки</h1></div>
+    <button class="button ghost" @onclick="NewProfile">Новый профиль</button>
+</div>
+
+<div class="settings-grid">
+    <aside class="panel profile-list">
+        <span class="eyebrow">Профили</span>
+        @foreach (var item in _profiles)
+        {
+            <button class="operation @(_profile?.Id == item.Id ? "active" : null)" @onclick="() => SelectProfileAsync(item)"><strong>@item.Name</strong><small>@(item.Inn ?? "ИНН не указан")</small></button>
+        }
+    </aside>
+
+    <div class="settings-content">
+        @if (_profile is not null)
+        {
+            <section class="panel form-section">
+                <div class="panel-title"><div><span class="eyebrow">Профиль</span><h2>Организация</h2></div></div>
+                <div class="form-grid organization-fields"><label>Название<input @bind="_profile.Name" maxlength="200" />@FieldError(nameof(CrptProfile.Name))</label><label>ИНН<input @bind="_profile.Inn" maxlength="12" inputmode="numeric" />@FieldError(nameof(CrptProfile.Inn))</label></div>
+            </section>
+
+            <section class="panel form-section">
+                <span class="eyebrow">Certificate</span><h2>Сертификат</h2>
+                <label>@IntegrationOptions.Value.CertificateStoreLocation/@IntegrationOptions.Value.CertificateStoreName
+                    <select value="@_profile.CertificateThumbprint" @onchange="CertificateChangedAsync">
+                        <option value="">Не выбран</option>
+                        @foreach (var certificate in _certificates)
+                        {
+                            <option value="@certificate.Thumbprint">@certificate.Subject — до @certificate.NotAfter.ToString("dd.MM.yyyy")</option>
+                        }
+                    </select>
+                    @FieldError(nameof(CrptProfile.CertificateThumbprint))
+                </label>
+                @if (_validation?.Certificate is not null)
+                {
+                    <dl class="certificate"><dt>Владелец</dt><dd>@_validation.Certificate.Subject</dd><dt>Издатель</dt><dd>@_validation.Certificate.Issuer</dd><dt>Thumbprint</dt><dd><code>@_validation.Certificate.Thumbprint</code></dd><dt>Срок действия</dt><dd>@_validation.Certificate.NotBefore.ToString("dd.MM.yyyy") — @_validation.Certificate.NotAfter.ToString("dd.MM.yyyy")</dd></dl>
+                }
+                @if (_validation is not null) { <div class="notice @(_validation.IsValid && _validation.HasPrivateKey ? null : "error")">@_validation.Message</div> }
+                @if (IntegrationOptions.Value.Mode == CrptIntegrationMode.Production)
+                {
+                    <button class="button ghost" @onclick="CheckTrueApiAsync" disabled="@_checkingConnection">@(_checkingConnection ? "Проверяется…" : "Проверить")</button>
+                }
+                @if (_connectionCheck is not null)
+                {
+                    <div class="notice @(_connectionCheck.Success ? null : "error")">@_connectionCheck.Message</div>
+                }
+            </section>
+
+            <section class="panel form-section">
+                <span class="eyebrow">Национальный каталог · @(IntegrationOptions.Value.Mode == CrptIntegrationMode.Production ? "боевой контур" : "mock")</span><h2>Национальный каталог</h2>
+                @if (IntegrationOptions.Value.Mode == CrptIntegrationMode.Production)
+                {
+                    <label>Боевой Base URL<input value="@IntegrationOptions.Value.NationalCatalogBaseUrl" readonly /></label>
+                }
+                else
+                {
+                    <label>Mock Base URL<input @bind="_profile.NationalCatalogProductionBaseUrl" />@FieldError(nameof(CrptProfile.NationalCatalogProductionBaseUrl))</label>
+                }
+                <small class="muted">Для запросов используется токен единой авторизации True API. Он получается автоматически по ИНН и сертификату выбранного профиля.</small>
+            </section>
+
+            <section class="panel form-section">
+                <span class="eyebrow">True API · боевой контур</span><h2>True API</h2>
+                <label>Боевой Base URL<input value="@IntegrationOptions.Value.TrueApiBaseUrl" readonly /></label>
+                <small class="muted">Адрес задаётся конфигурацией службы и не редактируется из интерфейса.</small>
+            </section>
+
+            <section class="panel form-section">
+                <span class="eyebrow">СУЗ · mock</span><h2>СУЗ</h2>
+                <div class="form-grid"><label>OmsId<input @bind="_profile.SuzOmsId" maxlength="36" />@FieldError(nameof(CrptProfile.SuzOmsId))</label><label>ConnectionId<input @bind="_profile.SuzConnectionId" maxlength="128" />@FieldError(nameof(CrptProfile.SuzConnectionId))</label></div>
+                <label>Mock Base URL<input @bind="_profile.SuzProductionBaseUrl" />@FieldError(nameof(CrptProfile.SuzProductionBaseUrl))</label>
+            </section>
+
+            <section class="panel form-section">
+                <span class="eyebrow">Головное ПО</span><h2>TraceX</h2>
+                <label>Тип базы данных
+                    <select @bind="_traceXProvider" disabled="@_checkingTraceX">
+                        <option value="@TraceXDatabaseProvider.SqlServer">MS SQL</option>
+                        <option value="@TraceXDatabaseProvider.PostgreSql">PostgreSQL</option>
+                    </select>
+                    @FieldError(nameof(CrptProfile.TraceXDatabaseProvider))
+                </label>
+                <label>Строка подключения <span class="secret-state">@(_traceXConfigured ? "✓ сохранена защищённо" : "не задана")</span>
+                    <input type="password" @bind="_traceXConnectionInput" autocomplete="new-password" placeholder="Введите новое значение" disabled="@_checkingTraceX" />
+                    @FieldError("TraceXConnection")
+                </label>
+                <small class="muted">Сохранённое значение не отображается. При смене типа базы введите и сохраните новую строку подключения.</small>
+                <div class="actions">
+                    <button class="button ghost" @onclick="SaveTraceXAsync" disabled="@(string.IsNullOrWhiteSpace(_traceXConnectionInput) || _checkingTraceX)">Сохранить подключение</button>
+                    <button class="button ghost" @onclick="ClearTraceXAsync" disabled="@(!_traceXConfigured || _checkingTraceX)">Очистить</button>
+                    <button class="button ghost" @onclick="CheckTraceXAsync" disabled="@(_checkingTraceX || (!_traceXConfigured && string.IsNullOrWhiteSpace(_traceXConnectionInput)))">@(_checkingTraceX ? "Проверяется…" : "Проверить подключение")</button>
+                </div>
+                @if (_traceXMessage is not null)
+                {
+                    <div class="notice @(_traceXCheck?.Success == false || _traceXMessage.StartsWith("После смены", StringComparison.Ordinal) ? "error" : null)">@_traceXMessage</div>
+                }
+            </section>
+
+            <div class="save-bar"><span>@_saveMessage</span><button class="button primary" @onclick="SaveAsync">Сохранить профиль</button></div>
+        }
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<CrptProfile> _profiles = [];
+    private IReadOnlyList<CertificateInfo> _certificates = [];
+    private CrptProfile? _profile;
+    private CertificateValidationResult? _validation;
+    private string? _saveMessage;
+    private InputValidationResult _fieldValidation = new([]);
+    private TrueApiConnectionCheckResult? _connectionCheck;
+    private bool _checkingConnection;
+    private TraceXDatabaseProvider _traceXProvider = TraceXDatabaseProvider.SqlServer;
+    private TraceXDatabaseProvider _savedTraceXProvider = TraceXDatabaseProvider.SqlServer;
+    private string _traceXConnectionInput = string.Empty;
+    private bool _traceXConfigured;
+    private bool _checkingTraceX;
+    private string? _traceXMessage;
+    private TraceXConnectionCheckResult? _traceXCheck;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _profiles = await ProfileService.ListAsync();
+        _certificates = await ProfileService.GetCertificatesAsync();
+        Workbench.ProfileId ??= _profiles.FirstOrDefault()?.Id;
+        await SelectProfileAsync(_profiles.FirstOrDefault(x => x.Id == Workbench.ProfileId) ?? _profiles.FirstOrDefault());
+    }
+
+    private async Task SelectProfileAsync(CrptProfile? profile)
+    {
+        _profile = profile is null ? null : CopyProfile(profile);
+        _fieldValidation = new([]);
+        _validation = null;
+        _saveMessage = null;
+        _connectionCheck = null;
+        _traceXConnectionInput = string.Empty;
+        _traceXMessage = null;
+        _traceXCheck = null;
+        if (profile is null) return;
+        Workbench.ProfileId = profile.Id;
+        var traceXState = await ProfileService.GetTraceXConnectionStateAsync(profile.Id);
+        _traceXConfigured = traceXState.Configured;
+        _traceXProvider = traceXState.Provider;
+        _savedTraceXProvider = traceXState.Provider;
+        if (!string.IsNullOrWhiteSpace(profile.CertificateThumbprint)) await ValidateCertificateAsync();
+    }
+
+    private void NewProfile()
+    {
+        _profile = new CrptProfile { Name = "Новый профиль" };
+        _fieldValidation = new([]);
+        _validation = null;
+        _saveMessage = null;
+        _connectionCheck = null;
+        _traceXProvider = TraceXDatabaseProvider.SqlServer;
+        _savedTraceXProvider = TraceXDatabaseProvider.SqlServer;
+        _traceXConnectionInput = string.Empty;
+        _traceXConfigured = false;
+        _traceXMessage = null;
+        _traceXCheck = null;
+    }
+
+    private async Task SaveAsync() => _ = await SaveProfileAsync();
+
+    private async Task<bool> SaveProfileAsync()
+    {
+        if (_profile is null) return false;
+        _profile.TrueApiProductionBaseUrl = IntegrationOptions.Value.TrueApiBaseUrl;
+        _fieldValidation = ProfileService.ValidateProfile(_profile);
+        if (_fieldValidation.IsValid && !string.IsNullOrWhiteSpace(_profile.CertificateThumbprint) &&
+            !_certificates.Any(x => string.Equals(x.Thumbprint, _profile.CertificateThumbprint, StringComparison.OrdinalIgnoreCase)))
+            _fieldValidation = new([new(nameof(CrptProfile.CertificateThumbprint), "Выберите сертификат из списка.")]);
+        if (!_fieldValidation.IsValid) { _saveMessage = "Исправьте выделенные поля."; return false; }
+        await ProfileService.SaveAsync(_profile);
+        Logger.LogInformation("UI action {Action} {ProfileId}", "ProfileSaved", _profile.Id);
+        _profiles = await ProfileService.ListAsync();
+        _profile = _profiles.First(x => x.Id == _profile.Id);
+        Workbench.ProfileId = _profile.Id;
+        Workbench.NotifyProfileChanged();
+        _saveMessage = "Сохранено.";
+        return true;
+    }
+
+    private async Task<bool> SaveTraceXAsync()
+    {
+        if (_profile is null || string.IsNullOrWhiteSpace(_traceXConnectionInput)) return false;
+        _fieldValidation = ProfileService.ValidateTraceXConnection(_traceXProvider, _traceXConnectionInput);
+        if (!_fieldValidation.IsValid) { _traceXMessage = "Исправьте строку подключения TraceX."; return false; }
+        if (!await SaveProfileAsync()) return false;
+        await ProfileService.SaveTraceXConnectionAsync(_profile.Id, _traceXProvider, _traceXConnectionInput);
+        Logger.LogInformation("UI action {Action} {ProfileId}", "TraceXSaved", _profile.Id);
+        _profile.TraceXDatabaseProvider = _traceXProvider;
+        _savedTraceXProvider = _traceXProvider;
+        _traceXConnectionInput = string.Empty;
+        _traceXConfigured = true;
+        _traceXCheck = null;
+        _traceXMessage = "Подключение TraceX сохранено защищённо.";
+        return true;
+    }
+
+    private async Task ClearTraceXAsync()
+    {
+        if (_profile is null) return;
+        await ProfileService.ClearTraceXConnectionAsync(_profile.Id);
+        Logger.LogInformation("UI action {Action} {ProfileId}", "TraceXCleared", _profile.Id);
+        _traceXConnectionInput = string.Empty;
+        _traceXConfigured = false;
+        _traceXCheck = null;
+        _traceXMessage = "Подключение TraceX удалено.";
+    }
+
+    private async Task CheckTraceXAsync()
+    {
+        if (_profile is null || _checkingTraceX) return;
+        _checkingTraceX = true;
+        _traceXCheck = null;
+        _traceXMessage = null;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_traceXConnectionInput))
+            {
+                if (!await SaveTraceXAsync()) return;
+            }
+            else if (_traceXProvider != _savedTraceXProvider)
+            {
+                _traceXMessage = "После смены типа базы введите и сохраните новую строку подключения.";
+                return;
+            }
+
+            _traceXCheck = await ProfileService.CheckTraceXConnectionAsync(_profile.Id);
+            Logger.LogInformation("UI action {Action} {ProfileId} {Success}", "TraceXChecked", _profile.Id, _traceXCheck.Success);
+            _traceXMessage = _traceXCheck.Message;
+        }
+        finally
+        {
+            _checkingTraceX = false;
+        }
+    }
+
+    private async Task CertificateChangedAsync(ChangeEventArgs args)
+    {
+        if (_profile is null) return;
+        _profile.CertificateThumbprint = args.Value?.ToString();
+        await ValidateCertificateAsync();
+    }
+
+    private async Task ValidateCertificateAsync()
+    {
+        if (_profile is null) return;
+        _validation = await ProfileService.ValidateCertificateAsync(_profile.CertificateThumbprint ?? string.Empty);
+        Logger.LogInformation("UI action {Action} {ProfileId} {Success}", "CertificateChecked", _profile.Id, _validation.IsValid);
+    }
+
+    private async Task CheckTrueApiAsync()
+    {
+        if (_profile is null || _checkingConnection) return;
+        _checkingConnection = true;
+        _connectionCheck = null;
+        try
+        {
+            if (!await SaveProfileAsync()) return;
+            _connectionCheck = await ProfileService.CheckTrueApiConnectionAsync(_profile.Id);
+            Logger.LogInformation("UI action {Action} {ProfileId} {Success} {CorrelationId}", "TrueApiChecked", _profile.Id, _connectionCheck.Success, _connectionCheck.CorrelationId);
+        }
+        finally
+        {
+            _checkingConnection = false;
+        }
+    }
+
+    private RenderFragment FieldError(string field) => builder =>
+    {
+        var message = _fieldValidation.ErrorFor(field);
+        if (!string.IsNullOrEmpty(message))
+        {
+            builder.OpenElement(0, "small");
+            builder.AddAttribute(1, "class", "error-text");
+            builder.AddAttribute(2, "role", "alert");
+            builder.AddContent(3, message);
+            builder.CloseElement();
+        }
+    };
+
+    private static CrptProfile CopyProfile(CrptProfile profile) => new()
+    {
+        Id = profile.Id, Name = profile.Name, Inn = profile.Inn,
+        CertificateThumbprint = profile.CertificateThumbprint,
+        NationalCatalogProductionBaseUrl = profile.NationalCatalogProductionBaseUrl,
+        TrueApiProductionBaseUrl = profile.TrueApiProductionBaseUrl,
+        SuzOmsId = profile.SuzOmsId, SuzConnectionId = profile.SuzConnectionId,
+        SuzProductionBaseUrl = profile.SuzProductionBaseUrl,
+        TraceXDatabaseProvider = profile.TraceXDatabaseProvider
+    };
+}
+
+

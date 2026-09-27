@@ -1,0 +1,11 @@
+ Справочник «Типы эмиссии КИ» 
+        Код  Описание       LOCAL    Производство РФ      FOREIGN    Ввезён в РФ      REMAINS    Маркировка остатков      CROSSBORDER    Ввезён из стран ЕАЭС      REMARK    Перемаркировка      COMMISSION    Принят на комиссию от физического лица      REAPPLY    Маркировка вне производства или импорта     
+ 
+ 
+
+
+ Актуальные особые состояния 
+         Код  Описание  Актуальный статус       Для табачных товарных групп      IN_GRAY_ZONE    В Серой зоне    APPLIED      Для всех товарных групп, кроме табачных      EMPTY    Значение отсутствует        RESERVED_NOT_USED    Зарезервировано. Не использовать    INTRODUCED      INDIVIDUAL    КиЗ индивидуализирован (только для товарной группы «Товары из натурального меха»)    EMITTED, APPLIED      NON_INDIVIDUAL    Не индивидуализирован (только для товарной группы «Товары из натурального меха»)    EMITTED, APPLIED      WAIT_SHIPMENT    Ожидает приёмку товара    INTRODUCED      EXPORTED    Используется для документов экспорта        LOAN_RETIRED    Выведен из оборота по договору рассрочки    RETIRED      LOST_INVENTORY    Не найдены по итогу инвентаризации    INTRODUCED      REMARK_RETIRED    Перемаркирован    WRITTEN_OFF      WAIT_TRANSFER_TO_OWNER    Ожидает передачу собственнику    INTRODUCED      WAIT_REMARK    Ожидает перемаркировку    WRITTEN_OFF      RETIRED_CANCELLATION    Списан / Аннулирован    WRITTEN_OFF      FTS_RESPOND_NOT_OK    Отрицательное решение ФТС    APPLIED      FTS_RESPOND_WAITING    Ожидает подтверждение ФТС    APPLIED      FTS_CONTROL    На контроле ФТС    APPLIED      EAS_RESPOND_NOT_OK    Отрицательное решение ЕАЭС (только для товарной группы «Товары из натурального меха»)    RETIRED      EAS_RESPOND_WAITING    Ожидает подтверждение ЕАЭС (только для товарной группы «Товары из натурального меха»)    RETIRED      CONNECT_TAP    Подключён к оборудованию для розлива (только для товарной группы «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки»)    INTRODUCED, RETIRED      PRIM_RESPONSE_WAITING    Обрабатывается    INTRODUCED, APPLIED, RETIRED      MOVING_BY_UD    Отгружен (только для товарной группы «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки»)    INTRODUCED     
+ 
+ 
+ 

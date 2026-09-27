@@ -1,0 +1,124 @@
+namespace CrptWorkbench.Domain;
+
+public interface IProfileRepository
+{
+    Task<IReadOnlyList<CrptProfile>> ListAsync(CancellationToken cancellationToken = default);
+    Task<CrptProfile?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+    Task UpsertAsync(CrptProfile profile, CancellationToken cancellationToken = default);
+}
+
+public interface IApiRequestLogRepository
+{
+    Task AddAsync(ApiRequestLog entry, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ApiRequestLog>> ListAsync(int take, CancellationToken cancellationToken = default);
+    Task<ApiRequestLog?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+}
+
+public interface IFavoriteApiOperationRepository
+{
+    Task<IReadOnlyList<string>> ListOperationIdsAsync(Guid profileId, CancellationToken cancellationToken = default);
+    Task SetAsync(Guid profileId, string operationId, bool isFavorite, CancellationToken cancellationToken = default);
+}
+
+public interface ISecretStore
+{
+    Task<string?> GetAsync(string key, CancellationToken cancellationToken = default);
+    Task SetAsync(string key, string value, CancellationToken cancellationToken = default);
+    Task DeleteAsync(string key, CancellationToken cancellationToken = default);
+}
+
+public interface ITraceXConnectionTester
+{
+    Task<TraceXConnectionCheckResult> CheckAsync(
+        TraceXDatabaseProvider provider,
+        string connectionString,
+        CancellationToken cancellationToken = default);
+}
+
+public interface ITraceXConnectionStringValidator
+{
+    InputValidationResult Validate(TraceXDatabaseProvider provider, string connectionString);
+}
+
+public interface ISensitiveDataMasker
+{
+    string? MaskHeaders(string? value);
+    string? MaskBody(string? value);
+}
+
+public interface ICertificateService
+{
+    Task<IReadOnlyList<CertificateInfo>> GetAvailableCertificatesAsync(CancellationToken cancellationToken = default);
+    Task<CertificateInfo?> GetCertificateAsync(string thumbprint, CancellationToken cancellationToken = default);
+    Task<CertificateValidationResult> ValidateAsync(string thumbprint, CancellationToken cancellationToken = default);
+}
+
+public interface ICertificateSignatureService
+{
+    Task<string> SignAttachedPkcs7Base64Async(string data, string thumbprint, CancellationToken cancellationToken = default);
+    Task<string> SignDetachedPkcs7Base64Async(string data, string thumbprint, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Detached CMS signing is not available.");
+}
+
+public interface IPackageDocumentRepository
+{
+    Task AddAsync(PackageDocument document, CancellationToken cancellationToken = default);
+    Task UpdateAsync(PackageDocument document, CancellationToken cancellationToken = default);
+    Task<bool> CompleteCheckAsync(PackageDocument document, long leaseUntilUnixMs, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PackageDocument>> ListAsync(Guid profileId, PackageOperationKind kind, CancellationToken cancellationToken = default);
+    Task<PackageDocument?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PackageDocument>> ClaimDueAsync(long nowUnixMs, int take, CancellationToken cancellationToken = default);
+    Task<bool> ScheduleAsync(Guid profileId, Guid id, PackageOperationKind kind, long nowUnixMs, bool resume, CancellationToken cancellationToken = default);
+}
+
+public sealed record IntegrationAuthenticationContext(
+    Guid ProfileId,
+    string? Inn,
+    string? CertificateThumbprint);
+
+public interface ITrueApiTokenProvider
+{
+    Task<string> GetTokenAsync(
+        IntegrationAuthenticationContext authentication,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
+    void Invalidate(IntegrationAuthenticationContext authentication);
+}
+
+public sealed record IntegrationRequest(
+    string OperationId,
+    string Method,
+    string Url,
+    IReadOnlyDictionary<string, string> Headers,
+    string? Body,
+    string CorrelationId,
+    IntegrationAuthenticationContext? Authentication = null);
+
+public sealed record IntegrationExchange(
+    int StatusCode,
+    string RequestMethod,
+    string RequestUrl,
+    IReadOnlyDictionary<string, string> RequestHeaders,
+    string? RequestBody,
+    IReadOnlyDictionary<string, string> ResponseHeaders,
+    string? ResponseBody,
+    TimeSpan Duration,
+    IReadOnlyList<IntegrationExchange>? Exchanges = null);
+
+public interface ITrueApiClient
+{
+    Uri BaseAddress { get; }
+    Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default);
+}
+
+public interface INationalCatalogClient
+{
+    Uri BaseAddress { get; }
+    Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default);
+}
+
+public interface ISuzClient
+{
+    Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default);
+}

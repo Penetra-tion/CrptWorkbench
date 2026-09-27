@@ -1,0 +1,114 @@
+@page "/code-correction"
+@implements IAsyncDisposable
+@inject CodeCorrectionService Corrections
+@inject PackageDocumentTracker DocumentTracker
+@inject WorkbenchContext Workbench
+@inject IJSRuntime JavaScript
+@inject IOptions<CrptIntegrationOptions> IntegrationOptions
+
+<PageTitle>Корректировка сведений о кодах — CRPT Workbench</PageTitle>
+<div class="page-heading"><div><span class="eyebrow">Специальные возможности</span><h1>Корректировка сведений о кодах</h1></div></div>
+<div class="correction-page">
+<section class="panel">
+    <h2>Новые сведения</h2>
+    <p class="muted">Одна товарная группа и одинаковые новые значения для всех кодов. Будет отправлен один документ.</p>
+    <fieldset disabled="@_busy">
+    <div class="form-grid">
+        <label>Товарная группа<select @bind="_group" @bind:after="GroupChanged">@foreach (var group in CodeCorrectionRules.Groups) { <option value="@group.Code">@group.Name</option> }</select></label>
+        <label>Что изменить<select @bind="_kind" @bind:after="KindChanged">@foreach (var kind in CodeCorrectionRules.Kinds.Where(x => CodeCorrectionRules.Supports(_group, x.Code))) { <option value="@kind.Code">@kind.Name</option> }</select></label>
+    </div>
+    <p class="notice">@CodeCorrectionRules.Describe(_group, _kind)</p>
+    @if (_kind is "permitDocs" or "licences")
+    {
+        <label>Действие<select @bind="_operation" @bind:after="Invalidate"><option value="0">Добавить</option><option value="1">Заменить все</option></select></label>
+        @foreach (var row in _documentsInput)
+        {
+            <div class="correction-values" @key="row">
+                @if (_kind == "permitDocs") { <label>Тип документа<select @bind="row.Type" @bind:after="Invalidate">@foreach (var type in CodeCorrectionRules.AllowedPermitTypes(_group)) { <option value="@type">@PermitLabel(type)</option> }</select></label> }
+                <label>Номер<input @bind="row.Number" @bind:event="oninput" @bind:after="Invalidate" /></label>
+                <label>Дата<input type="date" value="@row.Date" @onchange="e => SetDate(row, e)" /></label>
+                <button class="button ghost" aria-label="Удалить документ" disabled="@(_documentsInput.Count == 1)" @onclick="() => RemoveDocument(row)">Удалить</button>
+            </div>
+        }
+        <button class="button ghost" @onclick="AddDocument">Добавить документ</button>
+    }
+    else if (_kind == "variableExpiration")
+    {
+        @foreach (var row in _expirationInput)
+        {
+            <div class="correction-values" @key="row">
+                <label>Индекс условия хранения<input type="number" min="0" @bind="row.Index" @bind:after="Invalidate" /></label>
+                <label>Годен до<input type="date" value="@row.Date" @onchange="e => SetExpiration(row, e)" /></label>
+                <button class="button ghost" aria-label="Удалить срок годности" disabled="@(_expirationInput.Count == 1)" @onclick="() => RemoveExpiration(row)">Удалить</button>
+            </div>
+        }
+        <button class="button ghost" @onclick="AddExpiration">Добавить условие хранения</button>
+    }
+    else if (_kind == "emissionType")
+    {
+        <label>Новый тип эмиссии<select @bind="_value" @bind:after="Invalidate"><option value="1">Производство в РФ</option><option value="2">Импорт</option></select></label>
+    }
+    else if (_kind is "productionDate" or "expirationDate")
+    {
+        <label>@KindName(_kind)<input type="date" value="@_value" @onchange="SetValue" /></label>
+    }
+    else
+    {
+        <label>@KindName(_kind)<input value="@_value" @oninput="SetValue" inputmode="@(_kind is "weight" or "tnved" ? "decimal" : "text")" /></label>
+    }
+    </fieldset>
+</section>
+<section class="panel">
+    <h2>Коды</h2>
+    <p class="muted">Один код на строку. TXT в UTF-8, до 100 000 уникальных кодов в документе. Повторы будут исключены.</p>
+    @if (IntegrationOptions.Value.Mode == CrptIntegrationMode.Mock)
+    {
+        <details><summary>Примеры для режима MOCK</summary><p class="muted">Для проверки выберите молочную продукцию и дату производства. Первый и четвёртый коды подходят, второй имеет неподходящий статус, третий относится к обуви.</p><pre>010460000000000021CORRECT000001
+010460000000000021CORRECT000002
+010460000000000021CORRECT000003
+010460000000000021CORRECT000004</pre></details>
+    }
+    <div id="correction-file-drop" class="correction-drop"><label for="correction-file" class="button ghost">Выбрать TXT-файл</label><span>или перетащите файл сюда</span><InputFile id="correction-file" OnChange="ReadFileAsync" accept=".txt,text/plain" disabled="@_busy" /></div>
+    <label for="correction-text">Список кодов</label>
+    <textarea id="correction-text" rows="7" spellcheck="false" disabled="@_busy" placeholder="Один код на строку"></textarea>
+    <div class="actions"><button class="button ghost" disabled="@_busy" @onclick="ReadTextAsync">Загрузить список</button></div>
+    <label class="checkbox-field"><input type="checkbox" @bind="_checkBeforeSending" @bind:after="Invalidate" disabled="@_busy" /> Проверять коды перед отправкой</label>
+    @if (!_checkBeforeSending) { <p class="notice">Без предварительной проверки статуса и товарной группы кодов.</p> }
+    <p class="muted">Права участника, сведения реестров и дополнительные условия проверяет Честный ЗНАК. Предварительная проверка не гарантирует принятие документа.</p>
+    @if (_message is not null) { <p class="notice" role="status">@_message</p> }
+    @if (_errors.Count > 0) { <div class="notice error" role="alert">@foreach (var error in _errors) { <p>@error</p> }</div> }
+    @if (_busy) { <div class="actions" role="status"><span>@_busyLabel @if (_progress is not null) { <span>@_progress.Checked / @_progress.Total</span> }</span><button class="button ghost" @onclick="Cancel">Отменить</button></div> }
+    @if (_codes.Count > 0)
+    {
+        <div class="panel-title"><h3>Кодов: @_codes.Count</h3>@if (_rows.Values.Any(x => !x.Passed)) { <button class="button ghost" disabled="@_busy" @onclick="RemoveFailedAsync">Удалить все неподходящие</button> }</div>
+        <div class="table-wrap"><table><thead><tr><th>Код</th><th>Статус</th><th>Товарная группа</th><th>Результат проверки</th><th></th></tr></thead><tbody>
+        @foreach (var code in _codes.Skip(_page * 100).Take(100))
+        {
+            var row = _rows.GetValueOrDefault(code);
+            <tr @key="code"><td><code>@(code)</code></td><td>@CodeInfoResults.StatusLabel(row?.Status)</td><td>@GroupName(row?.ProductGroup)</td><td>@if (row is null) { <span class="muted">Не проверен</span> } else if (row.Passed) { <span>Подходит</span> } else { @foreach (var reason in row.Reasons) { <div class="error-text">@reason</div> } }</td><td><button class="button ghost" disabled="@_busy" @onclick="() => RemoveAsync(code)" aria-label="Удалить код из списка">Удалить</button></td></tr>
+        }
+        </tbody></table></div>
+        @if (_codes.Count > 100) { <div class="actions"><button class="button ghost" disabled="@(_page == 0 || _busy)" @onclick="() => _page--">Назад</button><span>Страница @(_page + 1) / @((_codes.Count + 99) / 100)</span><button class="button ghost" disabled="@((_page + 1) * 100 >= _codes.Count || _busy)" @onclick="() => _page++">Далее</button></div> }
+    }
+    @if (_serverChecks.Count > 0) { <details><summary>Дополнительно проверит Честный ЗНАК</summary><ul>@foreach (var item in _serverChecks) { <li>@item</li> }</ul></details> }
+    <div class="actions submit-actions">
+        @if (_checkBeforeSending && !CanSend) { <button class="button primary" disabled="@(_busy || _codes.Count == 0 || Workbench.ProfileId is null)" @onclick="CheckAsync">Проверить</button> }
+        else { <button class="button primary" disabled="@(_busy || !CanSend)" @onclick="SubmitAsync">Подписать и отправить</button> }
+    </div>
+</section>
+<section class="panel">
+    <div class="panel-title"><h2>Отправленные документы</h2><button class="button ghost" disabled="@(_busy || _loadingDocuments)" @onclick="LoadAsync">Обновить</button></div>
+    @if (Workbench.ProfileId is null) { <p class="muted">Выберите профиль.</p> }
+    else if (_loadingDocuments && _documents.Count == 0) { <p role="status">Загружаем документы…</p> }
+    else if (_documents.Count == 0) { <p class="muted">Документов пока нет.</p> }
+    else
+    {
+        <div class="table-wrap"><table><thead><tr><th>Корректировка</th><th>GUID</th><th>Состояние</th><th>Отправлен</th><th>Проверка</th><th></th></tr></thead><tbody>
+        @foreach (var doc in _documents)
+        {
+            <tr><td>@KindName(doc.Action)<br /><small>@doc.ItemCount кодов · @GroupName(doc.ProductGroup) · @(doc.Mode == CrptIntegrationMode.Production ? "PRODUCTION" : "MOCK")</small></td><td><code>@(doc.DocumentId ?? "—")</code></td><td>@StateLabel(doc)@if (doc.RemoteStatus is not null) { <br /><small>@DocumentStatusResults.Status(doc.RemoteStatus)</small> }@if (!string.IsNullOrWhiteSpace(doc.Error)) { <div class="error-text">@doc.Error</div> }</td><td>@Date(doc.SubmittedAtUnixMs ?? doc.CreatedAtUnixMs)</td><td>@Date(doc.LastCheckedAtUnixMs)<br /><small>Следующая: @Date(doc.NextCheckAtUnixMs)</small></td><td>@if (doc.DocumentId is not null && doc.State is "Paused" or "Tracking") { <button class="button ghost" disabled="@_busy" @onclick="() => ContinueAsync(doc)">@(doc.State == "Paused" ? "Возобновить" : "Проверить сейчас")</button> }</td></tr>
+        }
+        </tbody></table></div>
+    }
+</section>
+</div>
