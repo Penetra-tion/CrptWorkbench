@@ -73,30 +73,37 @@ public sealed class ResultPresentationTests
     }
 
     [Fact]
-    public async Task CodeCardsPreserveDetailsAndOnlyAutoExpandSingleResult()
+    public async Task CodeCardsShowCoreDetailsAndKeepOnlyLargeListsCollapsed()
     {
         var item = new CodeInfoItem(new CisInfo
         {
             RequestedCis = "requested-code", Cis = "returned-code", GeneralPackageType = "BOX",
             Status = "INTRODUCED", OwnerName = "Владелец", OwnerInn = "1234567890",
+            ProductGroup = "Молочная продукция", ApplicationDate = new DateTimeOffset(2026, 9, 20, 0, 0, 0, TimeSpan.Zero),
+            Expirations = [new() { ExpirationStorageDate = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero), StorageConditionName = "Хранить в холоде" }],
+            CertDoc = [new() { Type = "CONFORMITY_DECLARATION", Number = "permit-123", Date = "2026-09-18" }],
             Child = ["child-code"], Parent = "parent-code"
         });
         var html = await Render<CodeInfoResultView>(new CodeInfoResults([item]));
         Assert.Contains("code-result-card", html);
         Assert.DoesNotContain("<table", html);
         Assert.DoesNotContain("демонстрационные", html);
-        Assert.Contains("open", html);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(html, "<details\\b").Cast<System.Text.RegularExpressions.Match>());
+        Assert.DoesNotContain("<details class=\"code-detail-disclosure code-bottom-disclosure\" open", html);
+        Assert.DoesNotContain("Подробные сведения", html);
         foreach (var value in new[] { "requested-code", "returned-code", "child-code", "parent-code", "1234567890",
-            "Состав и родительская упаковка", "Не возвращается для этого типа" })
+            "Состав упаковки · 1", "Не возвращается для этого типа", "Молочная продукция", "Хранить в холоде",
+            "Разрешительные документы", "permit-123", "20.09.2026", "01.10.2026" })
             Assert.Contains(value, html);
         Assert.DoesNotContain("<summary class=\"disclosure-toggle\">Даты и сроки</summary>", html);
         Assert.DoesNotContain("<summary class=\"disclosure-toggle\">Разрешительные документы</summary>", html);
         Assert.DoesNotContain("Оплата кода", html);
+        Assert.True(html.IndexOf("parent-code", StringComparison.Ordinal) < html.IndexOf("Состав упаковки", StringComparison.Ordinal));
         Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(html, "class=\\\"related-code-link\\\"").Count);
         Assert.Contains("<code>child-code</code></button>", html);
         Assert.Contains("<code>parent-code</code></button>", html);
         html = await Render<CodeInfoResultView>(new CodeInfoResults([item, new(new CisInfo { RequestedCis = "missing-code" }, "404", "Код не найден")]));
-        Assert.DoesNotContain("<details class=\"code-details\" open", html);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(html, "<details\\b").Cast<System.Text.RegularExpressions.Match>());
         Assert.Contains("metric-errors", html);
         Assert.Contains("missing-code", html);
         Assert.Contains("Ошибка 404", html);
@@ -115,8 +122,8 @@ public sealed class ResultPresentationTests
         };
         var html = await Render<CodeInfoResultView>(new CodeInfoResults([item]));
         Assert.Contains("Оплачен", html);
-        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(html, "<details\\b").Count);
-        Assert.Contains("<summary class=\"disclosure-toggle\">Документы по коду</summary>", html);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(html, "<details\\b").Cast<System.Text.RegularExpressions.Match>());
+        Assert.Contains("<summary class=\"disclosure-toggle\">Документы по коду · 1</summary>", html);
         Assert.Contains("<table class=\"code-history-table\"", html);
         Assert.Contains("document-id", html);
         Assert.Contains("Компания · ИНН 1234567890", html);

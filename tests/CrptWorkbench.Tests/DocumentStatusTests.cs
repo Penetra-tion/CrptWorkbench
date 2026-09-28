@@ -19,8 +19,8 @@ public sealed class DocumentStatusTests
     {
         var field = Assert.Single(new TrueApiDocumentStatusHandler(new MockTrueApiClient()).Descriptor.Fields, x => x.Name == "documentId");
 
-        Assert.Equal("ID документа", field.Label);
-        Assert.Equal("ID документа или ИдФайл", field.Placeholder);
+        Assert.Equal("GUID документа", field.Label);
+        Assert.Equal("00000000-0000-0000-0000-000000000001", field.Placeholder);
     }
 
     [Theory]

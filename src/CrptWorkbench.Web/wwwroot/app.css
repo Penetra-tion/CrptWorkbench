@@ -226,30 +226,31 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 .package-label small { margin-left: 7px; border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; }
 .requested-code { display: grid; gap: 8px; padding: 13px 15px; background: var(--input); border: 1px solid var(--line); border-radius: 9px; margin-bottom: 16px; }
 .requested-code code { font-size: .85rem; white-space: pre-wrap; }
-.code-primary-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1.3fr); gap: 16px; margin: 0 0 18px; }
+.code-response-code { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: -4px 0 16px; font-size: .83rem; }
+.code-response-code code { overflow-wrap: anywhere; }
+.code-primary-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 20px; margin: 0 0 18px; }
+.code-primary-fields > div { min-width: 0; }
 .code-primary-fields dt, .code-detail-grid dt { color: var(--muted); font-size: .8rem; }
-.code-primary-fields dd { margin: 6px 0 0; font-weight: 600; }
+.code-primary-fields dd { min-width: 0; margin: 6px 0 0; font-weight: 600; overflow-wrap: break-word; }
 .code-primary-fields small { display: block; margin-top: 4px; font-weight: 400; }
-.code-details { border-top: 1px solid var(--line); padding-top: 14px; }
-.code-details summary { cursor: pointer; }
-.code-details[open] summary { margin-bottom: 18px; }
-.code-detail-sections { display: grid; grid-template-columns: minmax(0, .92fr) minmax(min(100%, 360px), 1.08fr); gap: 18px; align-items: start; }
-.code-detail-section { min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--input) 52%, transparent); padding: 14px; }
-.code-detail-section h4 { margin: 0 0 14px; color: var(--heading); font-size: .9rem; }
+.code-expiration-field, .code-parent-field { grid-column: 1 / -1; }
+.code-expiration-list { display: flex; flex-wrap: wrap; gap: 10px 24px; }
+.code-expiration-list > span { min-width: 0; }
+.code-permits { border-top: 1px solid var(--line); padding: 14px 0 4px; }
+.code-permits h4 { margin: 0 0 8px; color: var(--heading); font-size: .9rem; }
+.code-bottom-disclosure { border-top: 1px solid var(--line); padding: 12px 0; }
+.code-bottom-disclosure .disclosure-content { padding-top: 12px; }
 .code-detail-disclosure > summary { cursor: pointer; color: var(--heading); font-size: .9rem; }
-.code-detail-disclosure[open] > summary { margin-bottom: 14px; }
-.code-details, .code-detail-disclosure { interpolate-size: allow-keywords; }
-.code-details::details-content, .code-detail-disclosure::details-content { block-size: 0; overflow: hidden; content-visibility: hidden; transition: block-size .24s cubic-bezier(.2, .8, .2, 1), content-visibility .24s allow-discrete; }
-.code-details[open]::details-content, .code-detail-disclosure[open]::details-content { block-size: auto; content-visibility: visible; }
-.code-details .disclosure-content, .code-detail-disclosure .disclosure-content { animation: none; }
-.code-history-section { grid-column: 1 / -1; }
+.code-detail-disclosure { interpolate-size: allow-keywords; }
+.code-detail-disclosure::details-content { block-size: 0; overflow: hidden; content-visibility: hidden; transition: block-size .24s cubic-bezier(.2, .8, .2, 1), content-visibility .24s allow-discrete; }
+.code-detail-disclosure[open]::details-content { block-size: auto; content-visibility: visible; }
+.code-detail-disclosure .disclosure-content { animation: none; }
 .code-history-scroll { max-width: 100%; overflow-x: auto; }
 .code-history-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
 .code-history-table th, .code-history-table td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; min-width: 120px; }
 .code-history-table th { color: var(--muted); font-weight: 600; }
 .code-history-table td small { display: block; margin-top: 4px; }
 .code-history-table .code-history-id { min-width: 200px; overflow-wrap: anywhere; }
-.code-relations { grid-column: 1 / -1; }
 .code-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; font-size: .85rem; }
 .detail-field { min-width: 0; display: grid; align-content: start; gap: 5px; border: 1px solid color-mix(in srgb, var(--line) 72%, transparent); border-radius: 8px; background: var(--surface); padding: 10px 11px; }
 .detail-field-wide { grid-column: 1 / -1; }
@@ -298,10 +299,10 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
     .code-detail-grid dd + dt { margin-top: 8px; }
     .document-status-banner { padding: 15px; }
 }
-@media (max-width: 900px) {
-    .code-detail-sections { grid-template-columns: minmax(0, 1fr); }
-}
-.permit-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 8px; }
+.permit-list { display: grid; gap: 0; }
+.permit-document { display: flex; flex-wrap: wrap; gap: 4px 14px; min-width: 0; padding: 9px 0; overflow-wrap: break-word; }
+.permit-document + .permit-document { border-top: 1px solid var(--line); }
+.permit-document strong { color: var(--heading); }
 .expiration-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 8px; }
 .detail-card { display: grid; gap: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--input); padding: 10px 12px; }
 .detail-card strong { color: var(--heading); }
@@ -450,7 +451,7 @@ th, td { padding: 11px 10px; border-bottom: 1px solid var(--line); }
 
 @container (max-width: 959px) {
     .history-grid { grid-template-columns: minmax(0, 1fr); }
-    .code-detail-sections { grid-template-columns: minmax(0, 1fr); }
+    .code-primary-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @container (max-width: 719px) {
     .console-grid, .settings-grid { grid-template-columns: minmax(0, 1fr); }
