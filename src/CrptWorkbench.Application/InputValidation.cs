@@ -47,6 +47,9 @@ public static class InputValidation
                 case TrueApiCodeInfoHandler.OperationId:
                     TrueApiCodeInfoHandler.Parse(values);
                     break;
+                case TrueApiBulkCodeInfoHandler.OperationId:
+                    TrueApiBulkCodeInfoHandler.Parse(values);
+                    break;
                 case TrueApiDocumentStatusHandler.OperationId:
                     TrueApiDocumentStatusHandler.Parse(values);
                     break;
@@ -68,7 +71,7 @@ public static class InputValidation
         }
         catch (ArgumentException exception)
         {
-            var field = operationId == TrueApiCodeInfoHandler.OperationId ? "codes" : "documentId";
+            var field = operationId is TrueApiCodeInfoHandler.OperationId or TrueApiBulkCodeInfoHandler.OperationId ? "codes" : "documentId";
             if (operationId == TrueApiDocumentStatusHandler.OperationId && exception.Message.Contains("товарной группы", StringComparison.Ordinal)) field = "productGroup";
             issues.Add(new(field, exception.Message));
         }

@@ -227,6 +227,28 @@ public sealed class ProductionTrueApiTests
         Assert.Equal(0, tokenProvider.Invalidations);
     }
 
+    [Fact]
+    public async Task BulkCodeInfoAllowsOnlyExistingPathAndAtMostOneThousandCodes()
+    {
+        var calls = 0;
+        var handler = new DelegateHandler(_ =>
+        {
+            Interlocked.Increment(ref calls);
+            return Task.FromResult(Json(HttpStatusCode.OK, "[]"));
+        });
+        var client = new RealTrueApiClient(new StaticHttpClientFactory(handler), new RotatingTokenProvider(), Options.Create(ProductionOptions()));
+        var url = $"{CrptIntegrationOptions.ProductionTrueApiBaseUrl}/cises/info";
+        IntegrationRequest Request(string target, string body) => new("true-api.code-info-bulk", "POST", target,
+            new Dictionary<string, string> { ["X-Correlation-Id"] = "bulk-test" }, body, "bulk-test", Authentication);
+        var code = "010460000000000021DEMO000000001";
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.ExecuteAsync(Request(url + "?pg=milk", $"[\"{code}\"]"), TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.ExecuteAsync(Request(url, JsonSerializer.Serialize(Enumerable.Repeat(code, 1001))), TestContext.Current.CancellationToken));
+        Assert.Equal(0, calls);
+        var exchange = await client.ExecuteAsync(Request(url, $"[\"{code}\"]"), TestContext.Current.CancellationToken);
+        Assert.Equal(200, exchange.StatusCode);
+        Assert.Equal(1, calls);
+    }
+
     [Theory]
     [InlineData("challenge")]
     [InlineData("  Проверка\r\nстрока\n尾  ")]

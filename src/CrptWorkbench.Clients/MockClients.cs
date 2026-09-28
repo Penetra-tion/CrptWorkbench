@@ -84,6 +84,10 @@ public sealed class MockTrueApiClient : ITrueApiClient
     private const string UnitTwo = "010460000000000021DEMO000000002";
     private const string Group = "046000000000000001";
     private const string Box = "000000000000000001";
+    private const string LargeBox = "000000000000000100";
+    private const string LargeUnitPrefix = "010460000000000021BULK";
+    private static readonly string[] LargeBoxChildren = Enumerable.Range(1, 100)
+        .Select(number => LargeUnitPrefix + number.ToString("D9", System.Globalization.CultureInfo.InvariantCulture)).ToArray();
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -140,7 +144,7 @@ public sealed class MockTrueApiClient : ITrueApiClient
             return MockExchangeFactory.ExecuteAsync(ApiSystem.TrueApi, request, cancellationToken,
                 JsonSerializer.Serialize(events, JsonOptions), ids.Length == 0 ? 404 : 200);
         }
-        if (request.OperationId != "true-api.code-info")
+        if (request.OperationId is not ("true-api.code-info" or "true-api.code-info-bulk"))
             return MockExchangeFactory.ExecuteAsync(ApiSystem.TrueApi, request, cancellationToken);
 
         var codes = JsonSerializer.Deserialize<string[]>(request.Body ?? "[]", JsonOptions) ?? [];
@@ -201,6 +205,28 @@ public sealed class MockTrueApiClient : ITrueApiClient
                 Child = [Group]
             });
 
+        if (code == LargeBox)
+            return new(new CisInfo
+            {
+                RequestedCis = code, Cis = code, ProductGroup = "milk", ProductGroupId = 8,
+                GeneralPackageType = "BOX", Status = "INTRODUCED", StatusEx = "EMPTY",
+                OwnerName = "Демонстрационный владелец", OwnerInn = "0000000000",
+                EmissionType = "LOCAL", Child = LargeBoxChildren
+            });
+
+        if (code.StartsWith(LargeUnitPrefix, StringComparison.Ordinal) &&
+            code.Length == LargeUnitPrefix.Length + 9 &&
+            int.TryParse(code.AsSpan(LargeUnitPrefix.Length), out var largeUnitNumber) &&
+            largeUnitNumber is >= 1 and <= 100 && code == LargeBoxChildren[largeUnitNumber - 1])
+            return new(new CisInfo
+            {
+                RequestedCis = code, Cis = code, Gtin = "04600000000000",
+                ProductName = "Демо: товар из транспортной упаковки на 100 КМ",
+                ProductGroup = "milk", ProductGroupId = 8, GeneralPackageType = "UNIT", PackageType = "UNIT",
+                Status = "INTRODUCED", StatusEx = "EMPTY", OwnerName = "Демонстрационный владелец",
+                OwnerInn = "0000000000", EmissionType = "LOCAL", Parent = LargeBox
+            });
+
         if (code == Group)
             return new(new CisInfo
             {
@@ -236,6 +262,7 @@ public sealed class MockTrueApiClient : ITrueApiClient
             ProductName = retired ? "Демо: молоко 2,5%" : "Демо: молоко 3,2%",
             ProductGroup = "milk", ProductGroupId = 8, Brand = "Демонстрационная марка",
             Status = retired ? "RETIRED" : "INTRODUCED", StatusEx = "EMPTY",
+            WithdrawReason = retired ? "DEFECT" : null,
             OwnerName = "Демонстрационный владелец", OwnerInn = "0000000000",
             ProducerName = "Демонстрационный производитель", ProducerInn = "0000000000",
             GeneralPackageType = "UNIT", PackageType = "UNIT", EmissionType = "LOCAL",

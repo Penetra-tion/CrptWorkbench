@@ -42,6 +42,46 @@ partial class WorkbenchDbContextModelSnapshot : ModelSnapshot
             b.ToTable("ApiRequestLogs");
         });
 
+        modelBuilder.Entity("CrptWorkbench.Domain.BulkCodeJob", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("TEXT");
+            b.Property<long>("CodeErrors").HasColumnType("INTEGER");
+            b.Property<long>("CodesCompleted").HasColumnType("INTEGER");
+            b.Property<long>("CodesFound").HasColumnType("INTEGER");
+            b.Property<DateTimeOffset>("CreatedAt").HasColumnType("TEXT");
+            b.Property<long>("CreatedAtUnixMs").HasColumnType("INTEGER");
+            b.Property<string>("Error").HasColumnType("TEXT");
+            b.Property<long>("FailedBatches").HasColumnType("INTEGER");
+            b.Property<long>("FileBytes").HasColumnType("INTEGER");
+            b.Property<string>("FileName").IsRequired().HasMaxLength(260).HasColumnType("TEXT");
+            b.Property<long>("LinesRead").HasColumnType("INTEGER");
+            b.Property<int>("Mode").HasColumnType("INTEGER");
+            b.Property<long>("NextBatchNumber").HasColumnType("INTEGER");
+            b.Property<long>("NextOffset").HasColumnType("INTEGER");
+            b.Property<Guid>("ProfileId").HasColumnType("TEXT");
+            b.Property<string>("State").IsRequired().HasMaxLength(32).HasColumnType("TEXT");
+            b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("TEXT");
+            b.HasKey("Id");
+            b.HasIndex("ProfileId");
+            b.HasIndex("State");
+            b.HasIndex("CreatedAtUnixMs");
+            b.ToTable("BulkCodeJobs");
+        });
+
+        modelBuilder.Entity("CrptWorkbench.Domain.BulkCodeBatch", b =>
+        {
+            b.Property<Guid>("JobId").HasColumnType("TEXT");
+            b.Property<long>("Number").HasColumnType("INTEGER");
+            b.Property<int>("CodeCount").HasColumnType("INTEGER");
+            b.Property<long>("EndOffset").HasColumnType("INTEGER");
+            b.Property<string>("Error").HasColumnType("TEXT");
+            b.Property<long>("StartOffset").HasColumnType("INTEGER");
+            b.Property<string>("State").IsRequired().HasMaxLength(32).HasColumnType("TEXT");
+            b.HasKey("JobId", "Number");
+            b.HasIndex("JobId", "State");
+            b.ToTable("BulkCodeBatches");
+        });
+
         modelBuilder.Entity("CrptWorkbench.Domain.CrptProfile", b =>
         {
             b.Property<Guid>("Id").HasColumnType("TEXT");
@@ -111,6 +151,16 @@ partial class WorkbenchDbContextModelSnapshot : ModelSnapshot
                 .HasForeignKey("ProfileId")
                 .OnDelete(DeleteBehavior.Cascade)
                 .IsRequired();
+        });
+        modelBuilder.Entity("CrptWorkbench.Domain.BulkCodeJob", b =>
+        {
+            b.HasOne("CrptWorkbench.Domain.CrptProfile", null)
+                .WithMany().HasForeignKey("ProfileId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+        });
+        modelBuilder.Entity("CrptWorkbench.Domain.BulkCodeBatch", b =>
+        {
+            b.HasOne("CrptWorkbench.Domain.BulkCodeJob", null)
+                .WithMany().HasForeignKey("JobId").OnDelete(DeleteBehavior.Cascade).IsRequired();
         });
 #pragma warning restore 612, 618
     }

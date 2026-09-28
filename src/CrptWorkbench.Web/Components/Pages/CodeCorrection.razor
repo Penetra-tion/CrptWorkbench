@@ -77,14 +77,15 @@
     <p class="muted">Один код на строку. TXT в UTF-8, до 100 000 уникальных кодов в документе. Повторы будут исключены.</p>
     @if (IntegrationOptions.Value.Mode == CrptIntegrationMode.Mock)
     {
-        <details><summary>Примеры для режима MOCK</summary><p class="muted">Для проверки выберите молочную продукцию и дату производства. Первый и четвёртый коды подходят, второй имеет неподходящий статус, третий относится к обуви.</p><pre>010460000000000021CORRECT000001
+        <details class="mock-example" open><summary>Тестовые данные для Mock</summary><p class="muted">Для проверки выберите молочную продукцию и дату производства. Первый и четвёртый коды подходят, второй имеет неподходящий статус, третий относится к обуви.</p><pre>010460000000000021CORRECT000001
 010460000000000021CORRECT000002
 010460000000000021CORRECT000003
 010460000000000021CORRECT000004</pre></details>
     }
-    <div id="correction-file-drop" class="correction-drop"><label for="correction-file" class="button ghost">Выбрать TXT-файл</label><span>или перетащите файл сюда</span><InputFile id="correction-file" OnChange="ReadFileAsync" accept=".txt,text/plain" disabled="@_busy" /></div>
     <label for="correction-text">Список кодов</label>
-    <textarea id="correction-text" rows="7" spellcheck="false" disabled="@_busy" placeholder="Один код на строку"></textarea>
+    <FileTextInput ZoneId="correction-file-drop" FileId="correction-file" Disabled="@_busy" OnFileChange="ReadFileAsync">
+        <textarea id="correction-text" rows="7" spellcheck="false" disabled="@_busy" placeholder="Один код на строку"></textarea>
+    </FileTextInput>
     <div class="actions"><button class="button ghost" disabled="@_busy" @onclick="ReadTextAsync">Загрузить список</button></div>
     <label class="checkbox-field"><input type="checkbox" @bind="_checkBeforeSending" @bind:after="Invalidate" disabled="@_busy" /> Проверять коды перед отправкой</label>
     @if (!_checkBeforeSending) { <p class="notice">Без предварительной проверки статуса и товарной группы кодов.</p> }

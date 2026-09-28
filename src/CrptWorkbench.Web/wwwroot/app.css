@@ -210,6 +210,11 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 .execute-button span { font-size: 1.1rem; }
 .response-viewer { margin-top: 16px; overflow: hidden; }
 .field-help { display: block; font-weight: 400; line-height: 1.6; overflow-wrap: anywhere; }
+.mock-example { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; max-width: 720px; margin: 12px 0; padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); font-size: .83rem; }
+.mock-example code, .mock-example pre { overflow-wrap: anywhere; white-space: pre-wrap; }
+.mock-example pre { width: 100%; margin: 5px 0 0; }
+.mock-example summary { cursor: pointer; font-weight: 680; }
+.mock-example p { width: 100%; margin: 0; }
 .checkbox-field { grid-template-columns: auto 1fr; align-items: center; column-gap: 10px; }
 .checkbox-field input { width: 18px; height: 18px; margin: 0; padding: 0; accent-color: var(--accent); }
 .checkbox-field .field-help { grid-column: 2; }
@@ -539,3 +544,17 @@ th, td { padding: 11px 10px; border-bottom: 1px solid var(--line); }
     .operation-card { padding: var(--space-4); }
     .operations-back { min-height: 44px; }
 }
+/* Shared text and TXT input used by code and package forms. */
+.file-text-input { position: relative; min-width: 0; width: 100%; }
+.file-text-input textarea { display: block; width: 100%; box-sizing: border-box; padding-right: 3.5rem; padding-bottom: 3.5rem; }
+.file-text-input:has(.file-text-hint) textarea { padding-bottom: 4.6rem; }
+.file-text-input.dragging textarea { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-soft); }
+.file-text-input.is-disabled { opacity: .72; }
+.file-text-attach { position: absolute; right: .55rem; bottom: .55rem; z-index: 1; width: 2.5rem; height: 2.5rem; display: grid; place-items: center; border: 1px solid var(--line); border-radius: .5rem; background: var(--surface); color: var(--text); cursor: pointer; }
+.file-text-attach:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.file-text-attach:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.file-text-attach:disabled { cursor: not-allowed; }
+.file-text-attach svg { width: 1.25rem; height: 1.25rem; }
+.file-text-hint { position: absolute; left: .75rem; right: 3.5rem; bottom: .75rem; color: var(--muted); font-size: .8rem; line-height: 1.25; pointer-events: none; }
+.file-text-input input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+@media (pointer: coarse) { .file-text-attach { width: 2.75rem; height: 2.75rem; } }

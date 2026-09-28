@@ -1,18 +1,3 @@
-export function attach(zoneId, inputId) {
-  const zone = document.getElementById(zoneId);
-  const input = document.getElementById(inputId);
-  if (!zone || !input) return;
-  zone.addEventListener('dragover', event => { event.preventDefault(); zone.classList.add('dragging'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('dragging'));
-  zone.addEventListener('drop', event => {
-    event.preventDefault();
-    zone.classList.remove('dragging');
-    if (input.disabled || event.dataTransfer.files.length !== 1) return;
-    input.files = event.dataTransfer.files;
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-}
-
 export function freezePreview(element) {
   element.style.height = `${element.getBoundingClientRect().height}px`;
   element.style.overflowY = 'hidden';

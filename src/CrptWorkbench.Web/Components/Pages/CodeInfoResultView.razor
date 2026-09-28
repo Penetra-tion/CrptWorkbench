@@ -1,5 +1,7 @@
 @using System.Globalization
 
+@if (ShowSummary)
+{
 <div class="panel-title">
     <div><span class="eyebrow">Результат проверки кодов</span>
         <h2>@(Results.FoundCount == 0 ? "Коды не найдены" : Results.ErrorCount > 0 ? "Информация получена частично" : "Информация получена")</h2>
@@ -10,6 +12,7 @@
     <span>Найдено <strong>@Results.FoundCount</strong></span>
     <span class="@(Results.ErrorCount > 0 ? "metric-errors" : null)">@if (Results.ErrorCount > 0) { <span aria-hidden="true">! </span> }Ошибок <strong>@Results.ErrorCount</strong></span>
 </div>
+}
 <div class="code-result-list">
     @foreach (var item in Results.Items)
     {
@@ -30,6 +33,10 @@
                 <span class="outcome-badge @appearance.CssClass"><span class="outcome-icon" aria-hidden="true">@appearance.Icon</span>@(found ? CodeInfoResults.StatusLabel(info?.Status) : string.IsNullOrWhiteSpace(item.ErrorCode) ? "Ошибка" : $"Ошибка {item.ErrorCode}")</span>
             </header>
             <div class="requested-code"><span class="eyebrow">Код маркировки</span><code>@(info?.RequestedCis ?? info?.Cis ?? "—")</code></div>
+            @if (ShowOwnCodeAction && found && (info?.RequestedCis ?? info?.Cis) is { } ownCode)
+            {
+                <button type="button" class="button ghost" disabled="@Busy" @onclick="() => OnCodeSelected.InvokeAsync(ownCode)">Открыть код с историей документов</button>
+            }
             @if (!found)
             {
                 <div class="result-errors tone-error"><span aria-hidden="true">! </span>@(item.ErrorMessage ?? "Сведения о коде отсутствуют")</div>
@@ -43,6 +50,10 @@
                 <dl class="code-primary-fields">
                     <div><dt>GTIN</dt><dd>@GtinValue(info)</dd></div>
                     <div><dt>Владелец</dt><dd>@(info.OwnerName ?? "—") @if (info.OwnerInn is not null) { <small class="muted">ИНН @info.OwnerInn</small> }</dd></div>
+                    @if (info.Status is "RETIRED" or "WITHDRAWN" or "WRITTEN_OFF")
+                    {
+                        <div><dt>Причина вывода</dt><dd>@WithdrawalReason(info)</dd></div>
+                    }
                     @if (packageCode is "UNIT" or "GROUP" or "SET")
                     {
                         <div><dt>Оплата кода</dt><dd>@PaymentLabel(item.DocumentHistory)</dd></div>
@@ -165,8 +176,16 @@
     [Parameter, EditorRequired] public CodeInfoResults Results { get; set; } = new([]);
     [Parameter] public EventCallback<string> OnCodeSelected { get; set; }
     [Parameter] public bool Busy { get; set; }
+    [Parameter] public bool ShowSummary { get; set; } = true;
+    [Parameter] public bool ShowOwnCodeAction { get; set; }
 
     private static bool OmitsProductDetails(CisInfo? info) => CodeInfoResults.PackageTypeCode(info) is "BOX" or "ATK";
+
+    private static string WithdrawalReason(CisInfo info) =>
+        string.Equals(info.WithdrawReason, "OTHER", StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrWhiteSpace(info.WithdrawReasonOther)
+            ? info.WithdrawReasonOther
+            : CodeInfoResults.WithdrawalReasonLabel(info.WithdrawReason);
 
     private static bool HasPermits(CisInfo info) => info.CertDoc is { Count: > 0 } ||
         info.CertDocRequirementDetails is not null;

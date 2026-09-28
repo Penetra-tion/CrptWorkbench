@@ -28,11 +28,6 @@ label { display: grid; gap: .35rem; margin-bottom: .8rem; }
 .correction-values { display: flex; gap: .7rem; align-items: end; flex-wrap: wrap; }
 .correction-values label { flex: 1 1 180px; min-width: 0; }
 .correction-values button { margin-bottom: .8rem; }
-.correction-drop { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; border: 1px dashed var(--line); border-radius: .6rem; padding: .8rem; margin: .8rem 0; }
-.correction-drop label { margin: 0; }
-.correction-drop ::deep input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
-.correction-drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-.correction-drop.dragging { background: var(--surface-hover); }
 textarea { width: 100%; resize: vertical; }
 table code { overflow-wrap: anywhere; white-space: normal; }
 th, td { vertical-align: top; }

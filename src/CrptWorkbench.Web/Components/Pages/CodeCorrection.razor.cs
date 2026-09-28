@@ -46,7 +46,6 @@ public partial class CodeCorrection
         if (!firstRender) return;
         _module = await JavaScript.InvokeAsync<IJSObjectReference>("import", "./js/package-drop.js");
         _reference = DotNetObjectReference.Create(this);
-        await _module.InvokeVoidAsync("attach", "correction-file-drop", "correction-file");
         await _module.InvokeVoidAsync("attachText", "correction-text", _reference);
         _favoriteGroupsOnly = await JavaScript.InvokeAsync<bool>("crptWorkbench.getLocalFlag", FavoriteGroupsOnlyStorageKey);
         await LoadFavoriteGroupsAsync();

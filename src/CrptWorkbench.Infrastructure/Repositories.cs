@@ -36,6 +36,21 @@ public sealed class ProfileRepository(IDbContextFactory<WorkbenchDbContext> fact
 
 public sealed class ApiRequestLogRepository(IDbContextFactory<WorkbenchDbContext> factory) : IApiRequestLogRepository
 {
+    public async Task UpsertBulkSummaryAsync(ApiRequestLog entry, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var existing = await db.ApiRequestLogs.SingleOrDefaultAsync(x => x.Id == entry.Id && x.ProfileId == entry.ProfileId, cancellationToken);
+        if (existing is null) db.ApiRequestLogs.Add(entry);
+        else
+        {
+            existing.StatusCode = entry.StatusCode;
+            existing.Success = entry.Success;
+            existing.Error = entry.Error;
+            existing.ResponseBody = entry.ResponseBody;
+            existing.DurationMs = entry.DurationMs;
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
     public async Task AddAsync(ApiRequestLog entry, CancellationToken cancellationToken = default)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);

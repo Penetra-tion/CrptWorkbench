@@ -42,7 +42,14 @@
             </div>
             @if (!_technicalMode)
             {
-                @if (_result?.Codes is not null) { <CodeInfoResultView Results="_result.Codes" OnCodeSelected="RequestRelatedCode" /> }
+                @if (_result?.Codes is not null)
+                {
+                    @if (_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId && _result.Codes.Items.Count > 50)
+                    {
+                        <p class="muted">Показаны первые 50 из @_result.Codes.Items.Count результатов. Полный ответ доступен в техническом виде.</p>
+                    }
+                    <CodeInfoResultView Results="@(_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId ? new CodeInfoResults(_result.Codes.Items.Take(50).ToArray()) : _result.Codes)" OnCodeSelected="RequestRelatedCode" ShowOwnCodeAction="@(_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId)" />
+                }
                 else if (_result?.Product is not null) { <NationalCatalogProductResultView Result="_result.Product" /> }
                 else if (_result?.Documents is not null) { <DocumentStatusResultView Results="_result.Documents" /> }
                 else if (_result?.SuzDocuments is not null) { <SuzDocumentStatusResultView Results="_result.SuzDocuments" /> }
@@ -161,6 +168,7 @@
     private string OperationName(string id) => id switch
     {
         CodeCorrectionService.OperationId => "Корректировка сведений о кодах",
+        "true-api.code-info-bulk-file" => "Запрос по кодам + (файл)",
         PackageAggregationService.OperationId => "Формирование упаковки",
         PackageTransformationService.OperationId => "Трансформация упаковки",
         _ => _names.GetValueOrDefault(id, "Другая операция")

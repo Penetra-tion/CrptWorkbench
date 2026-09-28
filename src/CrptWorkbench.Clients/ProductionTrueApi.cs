@@ -136,7 +136,7 @@ public sealed class RealTrueApiClient(
 
     public async Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
     {
-        if (request.OperationId is not ("true-api.code-info" or "true-api.document-status" or "true-api.package-transformation" or "true-api.package-aggregation" or "true-api.code-correction"))
+        if (request.OperationId is not ("true-api.code-info" or "true-api.code-info-bulk" or "true-api.document-status" or "true-api.package-transformation" or "true-api.package-aggregation" or "true-api.code-correction"))
             throw new InvalidOperationException("The production True API client only permits approved operations.");
         var targetUrl = request.OperationId == "true-api.document-status"
             ? DocumentInfoRequestUri.Build(request.Url, "markirovka.crpt.ru").AbsoluteUri
@@ -151,6 +151,21 @@ public sealed class RealTrueApiClient(
             throw new InvalidOperationException("Invalid code information request.");
         if (request.OperationId == "true-api.code-info" && request.Url != $"{CrptIntegrationOptions.ProductionTrueApiBaseUrl}/cises/info" && request.Body is not null)
             throw new InvalidOperationException("Code history must not include a request body.");
+        if (request.OperationId == "true-api.code-info-bulk" &&
+            (request.Method != "POST" || request.Url != $"{CrptIntegrationOptions.ProductionTrueApiBaseUrl}/cises/info" || request.Body is null))
+            throw new InvalidOperationException("Invalid bulk code information request.");
+        if (request.OperationId == "true-api.code-info-bulk")
+        {
+            try
+            {
+                using var body = JsonDocument.Parse(request.Body!);
+                if (body.RootElement.ValueKind != JsonValueKind.Array || body.RootElement.GetArrayLength() is < 1 or > 1000 ||
+                    body.RootElement.EnumerateArray().Any(code => code.ValueKind != JsonValueKind.String ||
+                        code.GetString() is not { Length: >= 18 and <= 74 }))
+                    throw new InvalidOperationException("Invalid bulk code information request body.");
+            }
+            catch (JsonException) { throw new InvalidOperationException("Invalid bulk code information request body."); }
+        }
         var authentication = request.Authentication ?? throw new InvalidOperationException("True API authentication context is missing.");
         var stopwatch = Stopwatch.StartNew();
         var token = await tokens.GetTokenAsync(authentication, request.CorrelationId, cancellationToken);

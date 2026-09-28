@@ -12,6 +12,7 @@ public interface IApiRequestLogRepository
     Task AddAsync(ApiRequestLog entry, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ApiRequestLog>> ListAsync(Guid profileId, int take, CancellationToken cancellationToken = default);
     Task<ApiRequestLog?> GetAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default);
+    Task UpsertBulkSummaryAsync(ApiRequestLog entry, CancellationToken cancellationToken = default) => AddAsync(entry, cancellationToken);
 }
 
 public interface IFavoriteApiOperationRepository

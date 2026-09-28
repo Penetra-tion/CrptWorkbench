@@ -6,6 +6,7 @@
 @inject FavoriteProductGroupService FavoriteGroups
 @inject WorkbenchContext Workbench
 @inject IJSRuntime JavaScript
+@inject IOptions<CrptIntegrationOptions> IntegrationOptions
 
 <PageTitle>Трансформация упаковок — CRPT Workbench</PageTitle>
 <a class="operations-back" href="/operations"><span aria-hidden="true">←</span><span>Все операции</span></a>
@@ -33,14 +34,15 @@
             </div>
         </div>
     </div>
-    <div id="package-file-drop" class="package-drop">
-        <span class="package-drop-title">Перетащите текстовый файл сюда</span>
-        <label class="button ghost package-file-button" for="package-file-input">Выбрать TXT-файл</label>
-        <InputFile id="package-file-input" OnChange="ReadFileAsync" accept=".txt,text/plain" disabled="@_busy" />
-    </div>
     <label class="package-text-label" for="package-text-input">Вставьте список кодов</label>
     <p class="muted package-input-help">Подойдёт текст из блокнота или две колонки из Excel. Разделяйте коды пробелом или табуляцией, каждую пару начинайте с новой строки.</p>
-    <textarea id="package-text-input" rows="7" value="@_text" @oninput="TextChanged" disabled="@_busy" spellcheck="false" placeholder="Код вложения    Код упаковки"></textarea>
+    @if (IntegrationOptions.Value.Mode == CrptIntegrationMode.Mock)
+    {
+        <details class="mock-example" open><summary>Тестовые данные для Mock</summary><p class="muted">Выберите молочную продукцию и «Вложение».</p><pre>010460000000000021DEMO000000001 000000000000000001</pre></details>
+    }
+    <FileTextInput ZoneId="package-file-drop" FileId="package-file-input" Disabled="@_busy" OnFileChange="ReadFileAsync">
+        <textarea id="package-text-input" rows="7" value="@_text" @oninput="TextChanged" disabled="@_busy" spellcheck="false" placeholder="Код вложения    Код упаковки"></textarea>
+    </FileTextInput>
     <div class="actions"><button type="button" class="button ghost" @onclick="Preview" disabled="@_busy">Проверить строки</button></div>
     @if (_message is not null) { <p class="notice package-message @(_preview?.Errors.Count > 0 ? "error" : "")" role="status">@_message</p> }
 </section>
@@ -154,7 +156,6 @@
         if (!firstRender) return;
         _favoriteGroupsOnly = await JavaScript.InvokeAsync<bool>("crptWorkbench.getLocalFlag", FavoriteGroupsOnlyStorageKey);
         _dropModule = await JavaScript.InvokeAsync<IJSObjectReference>("import", "./js/package-drop.js");
-        await _dropModule.InvokeVoidAsync("attach", "package-file-drop", "package-file-input");
         await LoadFavoriteGroupsAsync();
         await LoadAsync();
         StateHasChanged();

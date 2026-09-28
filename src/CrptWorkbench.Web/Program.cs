@@ -57,6 +57,9 @@ try
     builder.Services.AddScoped<IProfileRepository, ProfileRepository>();
     builder.Services.AddScoped<IApiRequestLogRepository, ApiRequestLogRepository>();
     builder.Services.AddScoped<IPackageDocumentRepository, PackageDocumentRepository>();
+    builder.Services.AddScoped<IBulkCodeJobRepository, BulkCodeJobRepository>();
+    builder.Services.AddSingleton<IBulkCodeFileStore>(new BulkCodeFileStore(dataDirectory));
+    builder.Services.AddSingleton(integrationOptions);
     builder.Services.AddScoped<IFavoriteApiOperationRepository, FavoriteApiOperationRepository>();
     builder.Services.AddScoped<ISecretStore, DataProtectionSecretStore>();
     builder.Services.AddSingleton<ISensitiveDataMasker, SensitiveDataMasker>();
@@ -72,6 +75,7 @@ try
 
     builder.Services.AddCrptClients(integrationOptions);
     builder.Services.AddScoped<IApiOperationHandler, TrueApiCodeInfoHandler>();
+    builder.Services.AddScoped<IApiOperationHandler, TrueApiBulkCodeInfoHandler>();
     builder.Services.AddScoped<IApiOperationHandler, TrueApiDocumentStatusHandler>();
     builder.Services.AddScoped<IApiOperationHandler, NationalCatalogProductHandler>();
     builder.Services.AddScoped<IApiOperationHandler, SuzDocumentStatusHandler>();
@@ -87,7 +91,11 @@ try
     builder.Services.AddScoped<CodeCorrectionService>();
     builder.Services.AddScoped<PackageTransformationService>();
     builder.Services.AddScoped<PackageDocumentTracker>();
+    builder.Services.AddScoped<BulkCodeFileService>();
+    builder.Services.AddScoped<BulkCodeJobProcessor>();
+    builder.Services.AddSingleton<BulkCodeDownloadTickets>();
     builder.Services.AddHostedService<PackageDocumentWorker>();
+    builder.Services.AddHostedService<BulkCodeJobWorker>();
     builder.Services.AddScoped<WorkbenchContext>();
     builder.Services.AddScoped<ProductionReadinessService>();
 
@@ -162,6 +170,20 @@ try
     app.UseAntiforgery();
 
     app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
+    app.MapGet("/bulk-code-download", async (string ticket, BulkCodeDownloadTickets tickets, BulkCodeFileService service, CancellationToken cancellationToken) =>
+    {
+        if (!tickets.TryRead(ticket, out var profileId, out var jobId, out var statuses) ||
+            await service.GetAsync(profileId, jobId, cancellationToken) is null)
+            return Results.NotFound();
+        var selected = statuses.ToHashSet(StringComparer.Ordinal);
+        return Results.Stream(async output =>
+        {
+            await using var writer = new StreamWriter(output, new System.Text.UTF8Encoding(true), leaveOpen: true);
+            await foreach (var code in service.ExportAsync(profileId, jobId, selected, cancellationToken))
+                await writer.WriteLineAsync(code.AsMemory(), cancellationToken);
+            await writer.FlushAsync(cancellationToken);
+        }, "text/plain; charset=utf-8", $"codes-{jobId:N}.txt");
+    });
     app.MapGet("/health/ready", async (ProductionReadinessService readiness, CancellationToken cancellationToken) =>
     {
         var result = await readiness.CheckAsync(cancellationToken);

@@ -131,6 +131,30 @@ public sealed class CodeInfoTests
     }
 
     [Fact]
+    public async Task MockLargeTransportBoxContainsOneHundredResolvableUnits()
+    {
+        const string box = "000000000000000100";
+        var handler = new TrueApiCodeInfoHandler(new MockTrueApiClient());
+        var boxExchange = await handler.ExecuteAsync(Input(box), Context, TestContext.Current.CancellationToken);
+        var package = Assert.Single(CodeInfoResults.Parse(boxExchange.ResponseBody)!.Items).CisInfo!;
+        Assert.Equal("BOX", package.GeneralPackageType);
+        var children = Assert.IsAssignableFrom<IReadOnlyList<string>>(package.Child);
+        Assert.Equal(100, children.Count);
+        Assert.Equal(100, children.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal("010460000000000021BULK000000001", children[0]);
+        Assert.Equal("010460000000000021BULK000000100", children[^1]);
+
+        var unitExchange = await handler.ExecuteAsync(Input($"{children[0]}\n{children[^1]}"), Context, TestContext.Current.CancellationToken);
+        var units = CodeInfoResults.Parse(unitExchange.ResponseBody)!;
+        Assert.Equal(2, units.FoundCount);
+        Assert.All(units.Items, item =>
+        {
+            Assert.Equal("UNIT", item.CisInfo!.GeneralPackageType);
+            Assert.Equal(box, item.CisInfo.Parent);
+        });
+    }
+
+    [Fact]
     public async Task MockDocumentHistoryDistinguishesPaymentAndKeepsTechnicalExchanges()
     {
         var exchange = await new TrueApiCodeInfoHandler(new MockTrueApiClient()).ExecuteAsync(

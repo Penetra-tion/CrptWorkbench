@@ -1,9 +1,12 @@
 @inject ILogger<ApiConsole> Logger
 @page "/console"
-@implements IDisposable
+@implements IAsyncDisposable
 @using System.Text.Json
+@using System.Text
 @inject IApiOperationRegistry Registry
 @inject ExecuteApiOperationService Executor
+@inject BulkCodeFileService BulkFiles
+@inject BulkCodeDownloadTickets BulkTickets
 @inject ProfileService Profiles
 @inject FavoriteApiOperationService Favorites
 @inject WorkbenchContext Workbench
@@ -64,11 +67,25 @@
                 <div><span class="eyebrow">@SystemName(_selected.System)</span><h2>@_selected.Name</h2></div>
                 <span class="method-badge large">@_selected.HttpMethod</span>
             </div>
+
             <p class="muted">@_selected.Description</p>
 
             <div class="field-grid">
                 @foreach (var field in _selected.Fields)
                 {
+                    @if (field.Name == "codes" && _selected.Id is TrueApiCodeInfoHandler.OperationId or TrueApiBulkCodeInfoHandler.OperationId)
+                    {
+                        <div class="file-text-field">
+                            <label for="code-text-input">@field.Label</label>
+                            <FileTextInput @key="_selected.Id" ZoneId="code-file-drop" FileId="code-file-input" Disabled="@(_running || _bulkUploading)" Hint="@(_selected.Id == TrueApiBulkCodeInfoHandler.OperationId ? "TXT-файл запускает фоновую обработку и не помещается в поле." : null)" OnFileChange="@(_selected.Id == TrueApiBulkCodeInfoHandler.OperationId ? UploadBulkFileAsync : ReadCodesFileAsync)">
+                                <textarea id="code-text-input" rows="7" value="@GetValue(field.Name)" @oninput="args => SetValue(field.Name, args.Value?.ToString())" placeholder="@field.Placeholder" required="@field.Required" disabled="@(_running || _bulkUploading)" spellcheck="false" aria-describedby="@($"help-{field.Name}")"></textarea>
+                            </FileTextInput>
+                            @if (field.HelpText is not null) { <small id="@($"help-{field.Name}")" class="muted field-help">@field.HelpText</small> }
+                            @if (_fieldValidation.ErrorFor(field.Name) is { } fieldError) { <small class="error-text" role="alert">@fieldError</small> }
+                        </div>
+                    }
+                    else
+                    {
                     <label class="@(field.CheckedValue is null ? null : "checkbox-field")">
                         @if (field.CheckedValue is not null)
                         {
@@ -88,13 +105,71 @@
                         @if (field.HelpText is not null) { <small id="@($"help-{field.Name}")" class="muted field-help">@field.HelpText</small> }
                         @if (_fieldValidation.ErrorFor(field.Name) is { } fieldError) { <small class="error-text" role="alert">@fieldError</small> }
                     </label>
+                    }
                 }
             </div>
+
+            @if (_selected.Id == TrueApiBulkCodeInfoHandler.OperationId)
+            {
+                @if (_bulkUploading) { <p role="status">Загружаем файл на сервер…</p> }
+                @if (_bulkFileError is not null) { <p class="error-text" role="alert">@_bulkFileError</p> }
+                <fieldset class="bulk-status-filter">
+                    <legend>Показывать КМ в статусах</legend>
+                    <div class="bulk-status-options">
+                        @foreach (var status in BulkStatuses)
+                        {
+                            <label><input type="checkbox" checked="@_bulkStatuses.Contains(status.Code)" @onchange="args => SetBulkStatus(status.Code, args.Value is true)" disabled="@_running" /><span>@status.Label</span></label>
+                        }
+                        <label><input type="checkbox" checked="@_bulkPaidOnly" @onchange="args => SetBulkPaidOnly(args.Value is true)" disabled="@_running" /><span>Оплачен</span></label>
+                    </div>
+                </fieldset>
+                <div class="bulk-jobs">
+                    <div class="actions bulk-jobs-heading"><strong>Файловые задания</strong><button type="button" class="button ghost" @onclick="RefreshBulkJobsAsync">Обновить</button></div>
+                    @if (_bulkJobs.Count == 0) { <p class="muted">Заданий пока нет.</p> }
+                    @foreach (var job in _bulkJobs)
+                    {
+                        <div class="panel bulk-job">
+                            <strong>@job.FileName</strong>
+                            <p>Состояние: @BulkStateLabel(job.State). Обработано @job.CodesCompleted кодов; найдено @job.CodesFound; ошибок по кодам @job.CodeErrors; партий с ошибкой @job.FailedBatches.</p>
+                            <progress value="@job.NextOffset" max="@Math.Max(1, job.FileBytes)"></progress>
+                            <small class="muted">Прочитано @job.LinesRead строк; @job.NextOffset из @job.FileBytes байт.</small>
+                            @if (job.State == "Partial") { <p class="error-text">Результат неполный: часть партий завершилась ошибкой.</p> }
+                            @if (job.Error is not null) { <p class="error-text">@job.Error</p> }
+                            <div class="actions">
+                                <button type="button" class="button ghost" @onclick="() => DownloadBulkAsync(job.Id)" disabled="@(SelectedBulkStatuses.Count == 0 || job.CodesCompleted == 0)">Скачать КМ выбранных статусов</button>
+                                @if (job.State is "Queued" or "Running") { <button type="button" class="button ghost" @onclick="() => CancelBulkJobAsync(job.Id)">Отменить</button> }
+                                @if (job.State == "Partial") { <button type="button" class="button ghost" @onclick="() => RetryBulkJobAsync(job.Id)">Повторить ошибки</button> }
+                                @if (job.State == "Failed" && job.Error?.StartsWith("Недостаточно места", StringComparison.Ordinal) == true) { <button type="button" class="button ghost" @onclick="() => ResumeBulkJobAsync(job.Id)">Продолжить</button> }
+                                @if (job.State is "Completed" or "Partial" or "Canceled" or "Failed") { <button type="button" class="button ghost" @onclick="() => DeleteBulkJobAsync(job.Id)">Удалить</button> }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (!IsProduction && MockExamples.TryGetValue(_selected.Id, out var example))
+            {
+                <div class="mock-example">
+                    <span><strong>Тестовые данные для Mock:</strong> <code>@example.Display</code></span>
+                    <button type="button" class="button ghost" disabled="@_running" @onclick="() => ApplyMockExample(example)">Подставить</button>
+                </div>
+            }
+            @if (!IsProduction && _selected.Id == TrueApiCodeInfoHandler.OperationId)
+            {
+                <div class="mock-example">
+                    <span><strong>Транспортная упаковка со 100 КМ:</strong> <code>000000000000000100</code></span>
+                    <button type="button" class="button ghost" disabled="@_running" @onclick="ApplyLargeBoxExample">Подставить</button>
+                </div>
+            }
 
             <div class="actions editor-actions submit-actions">
                 <button type="button" class="button primary execute-button" @onclick="ExecuteAsync" disabled="@_running">
                     <span aria-hidden="true">@(_running ? "◌" : "→")</span>@(_running ? "Выполняется…" : "Получить информацию")
                 </button>
+                @if (_running && _selected.Id == TrueApiBulkCodeInfoHandler.OperationId)
+                {
+                    <button type="button" class="button ghost" @onclick="CancelBulk">Отменить</button>
+                }
             </div>
             @if (!string.IsNullOrWhiteSpace(_validationError))
             {
@@ -107,11 +182,38 @@
 @if (_result is not null)
 {
     <section @key="_result.CorrelationId" class="panel response-viewer result-enter">
-        <div class="result-view-switch view-switch" role="group" aria-label="Представление результата">
-            <button type="button" class="@(!_technicalMode ? "active" : null)" aria-pressed="@(!_technicalMode)" @onclick="() => SetMode(false)"><span aria-hidden="true">◫</span> Обычный</button>
-            <button type="button" class="@(_technicalMode ? "active" : null)" aria-pressed="@_technicalMode" @onclick="() => SetMode(true)"><span aria-hidden="true">{ }</span> Технический</button>
-        </div>
-        @if (!_technicalMode && _codeResults is not null)
+        @if (_selected?.Id != TrueApiBulkCodeInfoHandler.OperationId)
+        {
+            <div class="result-view-switch view-switch" role="group" aria-label="Представление результата">
+                <button type="button" class="@(!_technicalMode ? "active" : null)" aria-pressed="@(!_technicalMode)" @onclick="() => SetMode(false)"><span aria-hidden="true">◫</span> Обычный</button>
+                <button type="button" class="@(_technicalMode ? "active" : null)" aria-pressed="@_technicalMode" @onclick="() => SetMode(true)"><span aria-hidden="true">{ }</span> Технический</button>
+            </div>
+        }
+        @if (_selected?.Id == TrueApiBulkCodeInfoHandler.OperationId && _codeResults is not null && _result.Success)
+        {
+            <div class="bulk-result-heading">
+                <h2>Результат запроса</h2>
+                <button type="button" class="button ghost" @onclick="CopyBulkCodesAsync" disabled="@(BulkShownItems.Count == 0)">Скопировать все КМ</button>
+            </div>
+            @if (BulkShownItems.Count > 0)
+            {
+                <div class="bulk-result-scroll" role="table" aria-label="Результат запроса по кодам">
+                    <div class="bulk-result-grid bulk-result-header" role="row"><span role="columnheader">КМ</span><span role="columnheader">GTIN</span><span role="columnheader">ТГ</span><span role="columnheader">Статус</span></div>
+                    <div class="bulk-result-rows" style="height: @Math.Min(440, BulkShownItems.Count * 44 + 2)px">
+                        <Virtualize TItem="CodeInfoItem" @key="BulkShownItems" Items="BulkShownItems" Context="item" ItemSize="44" OverscanCount="6">
+                            <div class="bulk-result-grid bulk-result-row" role="row">
+                                <span role="cell" title="@(item.CisInfo?.RequestedCis ?? item.CisInfo?.Cis)">@(item.CisInfo?.RequestedCis ?? item.CisInfo?.Cis ?? "—")</span>
+                                <span role="cell" title="@item.CisInfo?.Gtin">@(string.IsNullOrWhiteSpace(item.CisInfo?.Gtin) ? "—" : item.CisInfo.Gtin)</span>
+                                <span role="cell" title="@item.CisInfo?.ProductGroup">@BulkProductGroupName(item.CisInfo)</span>
+                                <span role="cell"><span class="outcome-badge @ResultStatusAppearance.ForCode(item).CssClass">@CodeInfoResults.StatusLabel(item.CisInfo?.Status)</span></span>
+                            </div>
+                        </Virtualize>
+                    </div>
+                </div>
+            }
+            else { <p class="muted" role="status">Нет КМ для выбранных статусов</p> }
+        }
+        else if (!_technicalMode && _selected?.Id != TrueApiBulkCodeInfoHandler.OperationId && _codeResults is not null)
         {
             <CodeInfoResultView Results="_codeResults" Busy="_running" OnCodeSelected="RequestRelatedCodeAsync" />
         }
@@ -175,7 +277,64 @@
 }
 
 @code {
+    private sealed record MockExample(string Display, string Field, string Value);
+    private static readonly IReadOnlyDictionary<string, MockExample> MockExamples = new Dictionary<string, MockExample>
+    {
+        [TrueApiCodeInfoHandler.OperationId] = new("010460000000000021DEMO000000001", "codes", "010460000000000021DEMO000000001"),
+        [TrueApiBulkCodeInfoHandler.OperationId] = new("010460000000000021DEMO000000001\n010460000000000021DEMO000000002", "codes", "Два КМ с разными статусами"),
+        [TrueApiDocumentStatusHandler.OperationId] = new("demo-success", "documentId", "demo-success"),
+        [NationalCatalogProductHandler.OperationId] = new("04600000000000", "gtin", "04600000000000"),
+        [SuzDocumentStatusHandler.OperationId] = new("00000000-0000-0000-0000-000000000001", "documentId", "00000000-0000-0000-0000-000000000001"),
+        ["suz.order-status"] = new("demo-order-001", "value", "demo-order-001")
+    };
+
+    private void ApplyMockExample(MockExample example) => SetValue(example.Field, example.Value);
+    private void ApplyLargeBoxExample() => SetValue("codes", "000000000000000100");
+
     private static readonly ApiSystem[] SystemTabOrder = [ApiSystem.TrueApi, ApiSystem.Suz, ApiSystem.NationalCatalog];
+    private static readonly (string Code, string Label)[] BulkStatuses =
+    [
+        ("EMITTED", "Эмитирован"), ("APPLIED", "Нанесён"), ("INTRODUCED", "В обороте"),
+        ("WRITTEN_OFF", "Списан"), ("RETIRED", "Выбыл"), ("WITHDRAWN", "Выбыл (табак)"),
+        ("DISAGGREGATION", "Расформирован"), ("DISAGGREGATED", "Расформирован (табак)")
+    ];
+    private static string BulkProductGroupName(CisInfo? info) =>
+        CodeCorrectionRules.Groups.FirstOrDefault(group => group.Code == info?.ProductGroup || group.Id == info?.ProductGroupId)?.Name
+        ?? info?.ProductGroup ?? "—";
+    private readonly HashSet<string> _bulkStatuses = BulkStatuses.Select(x => x.Code).ToHashSet(StringComparer.Ordinal);
+    private bool _bulkPaidOnly = true;
+    private HashSet<string> SelectedBulkStatuses
+    {
+        get
+        {
+            var statuses = new HashSet<string>(_bulkStatuses, StringComparer.Ordinal);
+            if (!_bulkPaidOnly) statuses.Add("APPLIED_NOT_PAID");
+            return statuses;
+        }
+    }
+    private IReadOnlyList<BulkCodeJob> _bulkJobs = [];
+    private bool _bulkUploading;
+    private string? _bulkFileError;
+    private readonly CancellationTokenSource _bulkPollCancellation = new();
+    private List<CodeInfoItem> BulkShownItems { get; set; } = [];
+    private string BulkCopyText { get; set; } = "";
+    private void RefreshBulkSelection()
+    {
+        BulkShownItems = _codeResults is null ? [] : BulkCodeInfoSelection.Filter(_codeResults, SelectedBulkStatuses).ToList();
+        BulkCopyText = BulkCodeInfoSelection.CopyCodes(BulkShownItems);
+    }
+    private Task CopyBulkCodesAsync() => JavaScript.InvokeVoidAsync("crptWorkbench.copyText", BulkCopyText).AsTask();
+    private void SetBulkStatus(string code, bool selected)
+    {
+        if (selected) _bulkStatuses.Add(code); else _bulkStatuses.Remove(code);
+        RefreshBulkSelection();
+    }
+    private void SetBulkPaidOnly(bool selected)
+    {
+        _bulkPaidOnly = selected;
+        RefreshBulkSelection();
+    }
+    private void CancelBulk() => _executionCancellation?.Cancel();
     private IReadOnlyList<ApiOperationDescriptor> _operations = [];
     private readonly Dictionary<string, string> _values = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<ResultField> _friendlyResult = [];
@@ -188,6 +347,7 @@
     private SuzDocumentStatusResults? _suzDocumentStatusResults;
     private bool _technicalMode;
     private bool _running;
+    private CancellationTokenSource? _executionCancellation;
     private bool _favoritesView;
     private readonly HashSet<string> _favoriteIds = new(StringComparer.OrdinalIgnoreCase);
     private string? _validationError;
@@ -208,8 +368,11 @@
         var profiles = await Profiles.ListAsync();
         Workbench.ProfileId ??= profiles.FirstOrDefault()?.Id;
         await LoadFavoritesAsync();
+        await RefreshBulkJobsAsync();
+        _ = PollBulkJobsAsync();
         Workbench.ProfileChanged += OnProfileChanged;
     }
+
 
     private bool _unknownOperation;
     private string? _lastQuery;
@@ -258,6 +421,7 @@
         _selected = operation;
         _result = null;
         _codeResults = null;
+        RefreshBulkSelection();
         _nationalCatalogResult = null;
         _documentStatusResults = null;
         _suzDocumentStatusResults = null;
@@ -294,6 +458,102 @@
         _fieldValidation = new([]);
         _validationError = null;
     }
+    private async Task ReadCodesFileAsync(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            const int maxBytes = 1_000_000;
+            await using var stream = e.File.OpenReadStream(maxBytes);
+            using var reader = new StreamReader(stream, new UTF8Encoding(false, true));
+            SetValue("codes", await reader.ReadToEndAsync());
+        }
+        catch (Exception)
+        {
+            _validationError = "Не удалось прочитать TXT. Нужен файл UTF-8 размером до 1 МБ.";
+        }
+    }
+
+    private async Task UploadBulkFileAsync(InputFileChangeEventArgs e)
+    {
+        if (Workbench.ProfileId is not { } profileId) { _bulkFileError = "Выберите профиль."; return; }
+        _bulkUploading = true;
+        _bulkFileError = null;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(long.MaxValue, _bulkPollCancellation.Token);
+            await BulkFiles.UploadAsync(profileId, e.File.Name, e.File.Size, stream, _bulkPollCancellation.Token);
+            await RefreshBulkJobsAsync();
+        }
+        catch (OperationCanceledException) when (_bulkPollCancellation.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            _bulkFileError = exception is IOException ? "Не удалось сохранить файл: проверьте свободное место на диске." : "Не удалось загрузить TXT-файл.";
+        }
+        finally { _bulkUploading = false; }
+    }
+
+    private async Task RefreshBulkJobsAsync()
+    {
+        var profileId = Workbench.ProfileId;
+        var jobs = profileId is null ? [] : await BulkFiles.ListAsync(profileId.Value);
+        if (profileId != Workbench.ProfileId) return;
+        _bulkJobs = jobs;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task PollBulkJobsAsync()
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(_bulkPollCancellation.Token))
+                if (_selected?.Id == TrueApiBulkCodeInfoHandler.OperationId) await RefreshBulkJobsAsync();
+        }
+        catch (OperationCanceledException) when (_bulkPollCancellation.IsCancellationRequested) { }
+    }
+
+    private async Task CancelBulkJobAsync(Guid id)
+    {
+        if (Workbench.ProfileId is not { } profileId) return;
+        await BulkFiles.CancelAsync(profileId, id);
+        await RefreshBulkJobsAsync();
+    }
+
+    private async Task RetryBulkJobAsync(Guid id)
+    {
+        if (Workbench.ProfileId is not { } profileId) return;
+        await BulkFiles.RetryAsync(profileId, id);
+        await RefreshBulkJobsAsync();
+    }
+
+    private async Task ResumeBulkJobAsync(Guid id)
+    {
+        if (Workbench.ProfileId is not { } profileId) return;
+        await BulkFiles.ResumeAfterDiskErrorAsync(profileId, id);
+        await RefreshBulkJobsAsync();
+    }
+
+    private async Task DeleteBulkJobAsync(Guid id)
+    {
+        if (Workbench.ProfileId is not { } profileId) return;
+        await BulkFiles.DeleteAsync(profileId, id);
+        await RefreshBulkJobsAsync();
+    }
+
+    private async Task DownloadBulkAsync(Guid id)
+    {
+        if (Workbench.ProfileId is not { } profileId || SelectedBulkStatuses.Count == 0 ||
+            await BulkFiles.GetAsync(profileId, id) is null) return;
+        var ticket = BulkTickets.Issue(profileId, id, SelectedBulkStatuses);
+        Navigation.NavigateTo($"/bulk-code-download?ticket={Uri.EscapeDataString(ticket)}", forceLoad: true);
+    }
+
+    private static string BulkStateLabel(string state) => state switch
+    {
+        "Queued" => "в очереди", "Running" => "выполняется", "CancelRequested" => "отменяется",
+        "Canceled" => "отменено", "Completed" => "готово", "Partial" => "готово с ошибками",
+        "Failed" => "ошибка", _ => state
+    };
     private bool IsFavorite(string operationId) => _favoriteIds.Contains(operationId);
 
     private async Task ToggleFavoriteAsync(ApiOperationDescriptor operation)
@@ -320,6 +580,7 @@
     private void OnProfileChanged(object? sender, Guid? profileId) => _ = InvokeAsync(async () =>
     {
         await LoadFavoritesAsync();
+        await RefreshBulkJobsAsync();
         if (_favoritesView) SelectOperation(VisibleOperations.FirstOrDefault());
         StateHasChanged();
     });
@@ -342,12 +603,18 @@
 
         _validationError = null;
         _running = true;
+        _executionCancellation = new CancellationTokenSource();
+        if (_selected.Id == TrueApiBulkCodeInfoHandler.OperationId)
+        {
+        }
         try
         {
             Logger.LogInformation("UI operation started {OperationId} {ProfileId}", _selected.Id, Workbench.ProfileId.Value);
-            _result = await Executor.ExecuteAsync(_selected.Id, _values, Workbench.ProfileId.Value);
+            _result = await Executor.ExecuteAsync(_selected.Id, _values, Workbench.ProfileId.Value, _executionCancellation.Token);
             Logger.LogInformation("UI operation completed {OperationId} {CorrelationId} {Success} {StatusCode} {ElapsedMs}", _selected.Id, _result.CorrelationId, _result.Success, _result.StatusCode, _result.Duration.TotalMilliseconds);
-            _codeResults = _selected.Id == TrueApiCodeInfoHandler.OperationId ? CodeInfoResults.Parse(_result.ResponseBody) : null;
+            _codeResults = _selected.Id is TrueApiCodeInfoHandler.OperationId or TrueApiBulkCodeInfoHandler.OperationId && _result.Success
+                ? CodeInfoResults.Parse(_result.ResponseBody) : null;
+            RefreshBulkSelection();
             _nationalCatalogResult = _selected.Id == NationalCatalogProductHandler.OperationId && _result.Success
                 ? JsonSerializer.Deserialize<NationalCatalogProductResult>(_result.ResponseBody ?? "{}", new JsonSerializerOptions(JsonSerializerDefaults.Web))
                 : null;
@@ -357,6 +624,13 @@
                 ? SuzDocumentStatusResults.Parse(_result.ResponseBody) : null;
             _friendlyResult = BuildFriendlyResult(_result.ResponseBody);
         }
+        catch (OperationCanceledException) when (_executionCancellation.IsCancellationRequested)
+        {
+            _result = null;
+            _codeResults = null;
+            RefreshBulkSelection();
+            _validationError = "Запрос отменён.";
+        }
         catch (Exception exception)
         {
             Logger.LogError("UI operation failed {OperationId} {ExceptionType}", _selected.Id, exception.GetType().Name);
@@ -365,6 +639,8 @@
         finally
         {
             _running = false;
+            _executionCancellation?.Dispose();
+            _executionCancellation = null;
         }
     }
 
@@ -408,7 +684,13 @@
     private Task CopyResponseAsync() => JavaScript.InvokeVoidAsync("crptWorkbench.copyText", $"{_result?.ResponseHeaders}\n\n{_result?.ResponseBody}").AsTask();
     private static string SystemName(ApiSystem system) => system switch { ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", _ => "СУЗ" };
 
-    public void Dispose() => Workbench.ProfileChanged -= OnProfileChanged;
+    public ValueTask DisposeAsync()
+    {
+        Workbench.ProfileChanged -= OnProfileChanged;
+        _bulkPollCancellation.Cancel();
+        _bulkPollCancellation.Dispose();
+        return ValueTask.CompletedTask;
+    }
 
     private sealed record ResultField(string Label, string Value);
 }

@@ -14,6 +14,19 @@ namespace CrptWorkbench.Tests;
 public sealed class ResultPresentationTests
 {
     [Theory]
+    [InlineData("RETIRED", "DEFECT", null, "Повреждение или брак")]
+    [InlineData("WRITTEN_OFF", "OTHER", "Повреждение", "Повреждение")]
+    [InlineData("WITHDRAWN", null, null, "Не указана оператором")]
+    public async Task RetiredCodesShowWithdrawalReason(string status, string? reason, string? other, string expected)
+    {
+        var body = System.Text.Json.JsonSerializer.Serialize(new[] { new { cisInfo = new { status, withdrawReason = reason, withdrawReasonOther = other } } });
+        var results = CodeInfoResults.Parse(body)!;
+        var html = await Render<CodeInfoResultView>(results);
+        Assert.Contains("Причина вывода", html);
+        Assert.Contains(expected, html);
+    }
+
+    [Theory]
     [InlineData("INTRODUCED", "tone-success")]
     [InlineData("EMITTED", "tone-info")]
     [InlineData("APPLIED", "tone-info")]

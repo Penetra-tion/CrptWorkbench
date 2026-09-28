@@ -17,6 +17,8 @@ public sealed class WorkbenchDbContext(DbContextOptions<WorkbenchDbContext> opti
     public DbSet<ProtectedSecret> ProtectedSecrets => Set<ProtectedSecret>();
     public DbSet<FavoriteApiOperation> FavoriteApiOperations => Set<FavoriteApiOperation>();
     public DbSet<PackageDocument> PackageDocuments => Set<PackageDocument>();
+    public DbSet<BulkCodeJob> BulkCodeJobs => Set<BulkCodeJob>();
+    public DbSet<BulkCodeBatch> BulkCodeBatches => Set<BulkCodeBatch>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -66,6 +68,23 @@ public sealed class WorkbenchDbContext(DbContextOptions<WorkbenchDbContext> opti
             entity.Property(x => x.State).HasMaxLength(32).IsRequired();
             entity.Property(x => x.DocumentId).HasMaxLength(256);
             entity.Property(x => x.RemoteStatus).HasMaxLength(64);
+        });
+        modelBuilder.Entity<BulkCodeJob>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.ProfileId);
+            entity.HasIndex(x => x.State);
+            entity.HasIndex(x => x.CreatedAtUnixMs);
+            entity.Property(x => x.FileName).HasMaxLength(260).IsRequired();
+            entity.Property(x => x.State).HasMaxLength(32).IsRequired();
+            entity.HasOne<CrptProfile>().WithMany().HasForeignKey(x => x.ProfileId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<BulkCodeBatch>(entity =>
+        {
+            entity.HasKey(x => new { x.JobId, x.Number });
+            entity.HasIndex(x => new { x.JobId, x.State });
+            entity.Property(x => x.State).HasMaxLength(32).IsRequired();
+            entity.HasOne<BulkCodeJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

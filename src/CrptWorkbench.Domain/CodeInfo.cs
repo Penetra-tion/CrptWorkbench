@@ -54,6 +54,8 @@ public sealed record CisInfo
     public string? Brand { get; init; }
     public string? Status { get; init; }
     public string? StatusEx { get; init; }
+    public string? WithdrawReason { get; init; }
+    public string? WithdrawReasonOther { get; init; }
     public string? OwnerInn { get; init; }
     public string? OwnerName { get; init; }
     public string? ProducerInn { get; init; }

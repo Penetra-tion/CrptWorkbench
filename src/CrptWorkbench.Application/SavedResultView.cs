@@ -24,7 +24,8 @@ public sealed record SavedResultView(
         {
             return log.OperationId switch
             {
-                TrueApiCodeInfoHandler.OperationId => FromCodes(log),
+                TrueApiCodeInfoHandler.OperationId or TrueApiBulkCodeInfoHandler.OperationId => FromCodes(log),
+                "true-api.code-info-bulk-file" => FromBulkFile(log),
                 NationalCatalogProductHandler.OperationId => FromProduct(log),
                 TrueApiDocumentStatusHandler.OperationId => FromDocuments(log),
                 SuzDocumentStatusHandler.OperationId => FromSuzDocuments(log),
@@ -42,6 +43,21 @@ public sealed record SavedResultView(
     {
         var result = CodeInfoResults.Parse(log.ResponseBody);
         return result is null ? Invalid() : new(result, null, null, [], null);
+    }
+
+    private static SavedResultView FromBulkFile(ApiRequestLog log)
+    {
+        using var document = JsonDocument.Parse(log.ResponseBody!);
+        var root = document.RootElement;
+        return new(null, null, null,
+        [
+            new("Состояние", root.GetProperty("state").GetString() ?? "—"),
+            new("Прочитано строк", root.GetProperty("linesRead").GetInt64().ToString()),
+            new("Обработано кодов", root.GetProperty("codesCompleted").GetInt64().ToString()),
+            new("Найдено", root.GetProperty("codesFound").GetInt64().ToString()),
+            new("Ошибок по кодам", root.GetProperty("codeErrors").GetInt64().ToString()),
+            new("Партий с ошибкой", root.GetProperty("failedBatches").GetInt64().ToString())
+        ], null);
     }
 
     private static SavedResultView FromProduct(ApiRequestLog log)
