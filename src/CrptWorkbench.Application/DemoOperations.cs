@@ -41,7 +41,7 @@ public abstract class DemoOperationHandler
 
 public sealed class SuzDemoHandler(ISuzClient client) : DemoOperationHandler, IApiOperationHandler
 {
-    public ApiOperationDescriptor Descriptor { get; } = new("suz.order-status", "Запрос статуса заказа", ApiSystem.Suz, "GET",
+    public ApiOperationDescriptor Descriptor { get; } = new("suz.order-status", "Запрос статуса заказа · Mock", ApiSystem.Suz, "GET",
         "Проверка статуса заказа СУЗ. Сейчас ответ формируется локально.", typeof(DemoLookupRequest), typeof(DemoLookupResponse),
         [new("value", "Order ID", "demo-order-001")]);
 

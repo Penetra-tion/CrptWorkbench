@@ -42,6 +42,7 @@ public sealed class ProductionTrueApiNetworkGuardHandler : DelegatingHandler
             "/api/v3/true-api/auth/key" => request.Method == HttpMethod.Get,
             "/api/v3/true-api/auth/simpleSignIn" => request.Method == HttpMethod.Post,
             "/api/v3/true-api/cises/info" => request.Method == HttpMethod.Post,
+            "/api/v3/true-api/cises/history" => request.Method == HttpMethod.Post && CodeHistoryRequestUri.IsAllowed(uri),
             "/api/v3/true-api/lk/documents/create" => request.Method == HttpMethod.Post &&
                 uri.Query.StartsWith("?pg=", StringComparison.Ordinal) && PackageCreationRequest.IsAllowedGroup(uri.Query[4..]),
             _ when uri is not null && IsDocumentInfoRequest(uri) => request.Method == HttpMethod.Get,
@@ -51,7 +52,8 @@ public sealed class ProductionTrueApiNetworkGuardHandler : DelegatingHandler
         if (uri is null || !uri.IsAbsoluteUri || uri.Scheme != Uri.UriSchemeHttps ||
             !string.Equals(uri.Host, "markirovka.crpt.ru", StringComparison.OrdinalIgnoreCase) ||
             uri.Port != 443 || !string.IsNullOrEmpty(uri.UserInfo) ||
-            (!IsDocumentInfoRequest(uri) && uri.AbsolutePath != "/api/v3/true-api/lk/documents/create" && !string.IsNullOrEmpty(uri.Query)) ||
+            (!IsDocumentInfoRequest(uri) && uri.AbsolutePath != "/api/v3/true-api/lk/documents/create" &&
+                uri.AbsolutePath != "/api/v3/true-api/cises/history" && !string.IsNullOrEmpty(uri.Query)) ||
             !string.IsNullOrEmpty(uri.Fragment) || !validMethod)
         {
             throw new InvalidOperationException("Outgoing request is outside the configured True API production allowlist.");
@@ -125,6 +127,7 @@ public sealed class LoggingHandler(
             "/api/v3/true-api/auth/key" => "/api/v3/true-api/auth/key",
             "/api/v3/true-api/auth/simpleSignIn" => "/api/v3/true-api/auth/simpleSignIn",
             "/api/v3/true-api/cises/info" => "/api/v3/true-api/cises/info",
+            "/api/v3/true-api/cises/history" => "/api/v3/true-api/cises/history",
             "/api/v3/true-api/lk/documents/create" => "/api/v3/true-api/lk/documents/create",
             _ when request.RequestUri?.AbsolutePath.StartsWith("/api/v4/true-api/doc/", StringComparison.Ordinal) == true => "/api/v4/true-api/doc/{id}/info",
             "/cises/info" => "/cises/info",

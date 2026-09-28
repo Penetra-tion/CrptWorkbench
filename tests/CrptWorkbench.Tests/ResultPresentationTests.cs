@@ -87,8 +87,11 @@ public sealed class ResultPresentationTests
         Assert.DoesNotContain("демонстрационные", html);
         Assert.Contains("open", html);
         foreach (var value in new[] { "requested-code", "returned-code", "child-code", "parent-code", "1234567890",
-            "Даты и сроки", "Разрешительные документы", "Состав и родительская упаковка", "Не возвращается для этого типа" })
+            "Состав и родительская упаковка", "Не возвращается для этого типа" })
             Assert.Contains(value, html);
+        Assert.DoesNotContain("<summary class=\"disclosure-toggle\">Даты и сроки</summary>", html);
+        Assert.DoesNotContain("<summary class=\"disclosure-toggle\">Разрешительные документы</summary>", html);
+        Assert.DoesNotContain("Оплата кода", html);
         Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(html, "class=\\\"related-code-link\\\"").Count);
         Assert.Contains("<code>child-code</code></button>", html);
         Assert.Contains("<code>parent-code</code></button>", html);
@@ -99,6 +102,42 @@ public sealed class ResultPresentationTests
         Assert.Contains("Ошибка 404", html);
         Assert.Contains("Код не найден", html);
         Assert.Contains("Информация получена частично", html);
+    }
+
+    [Fact]
+    public async Task CodeCardShowsPaymentAndDocumentParticipants()
+    {
+        var item = new CodeInfoItem(new CisInfo { RequestedCis = "paid-code", Status = "INTRODUCED", GeneralPackageType = "UNIT" })
+        {
+            DocumentHistory = new(true,
+                [new("document-id", new DateTimeOffset(2026, 9, 24, 3, 54, 0, TimeSpan.Zero),
+                    "PAYMENT", "ACCEPTED", "Компания", "1234567890", null, null)])
+        };
+        var html = await Render<CodeInfoResultView>(new CodeInfoResults([item]));
+        Assert.Contains("Оплачен", html);
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(html, "<details\\b").Count);
+        Assert.Contains("<summary class=\"disclosure-toggle\">Документы по коду</summary>", html);
+        Assert.Contains("<table class=\"code-history-table\"", html);
+        Assert.Contains("document-id", html);
+        Assert.Contains("Компания · ИНН 1234567890", html);
+        Assert.Contains("24.09.2026 03:54 UTC", html);
+    }
+
+    [Theory]
+    [InlineData("UNIT", true)]
+    [InlineData("GROUP", true)]
+    [InlineData("SET", true)]
+    [InlineData("BOX", false)]
+    [InlineData("ATK", false)]
+    public async Task PaymentOnlyAppearsForEligibleCodeTypes(string type, bool visible)
+    {
+        var item = new CodeInfoItem(new CisInfo { RequestedCis = "code", GeneralPackageType = type })
+        {
+            DocumentHistory = new(false, [])
+        };
+        var html = await Render<CodeInfoResultView>(new CodeInfoResults([item]));
+        Assert.Equal(visible, html.Contains("<dt>Оплата кода</dt><dd>Не оплачен</dd>"));
+        Assert.DoesNotContain("<details", html);
     }
 
     [Fact]

@@ -20,8 +20,8 @@ public sealed class TrueApiDocumentStatusHandler(ITrueApiClient client) : IApiOp
     public ApiOperationDescriptor Descriptor { get; } = new(OperationId, "Запрос статуса документа", ApiSystem.TrueApi, "GET",
         "Время загрузки, тип, товарная группа, статус и ошибки обработки документа.",
         typeof(DocumentStatusRequest), typeof(DocumentStatusItem[]),
-        [new("documentId", "ID документа", "ID документа или ИдФайл",
-             HelpText: "Для локальной проверки: demo-success, demo-pending, demo-error."),
+        [new("documentId", "GUID документа", "00000000-0000-0000-0000-000000000001",
+             HelpText: "Для локальной проверки: demo-success, demo-pending, demo-error. Также поддерживается ИдФайл."),
          new("productGroup", "Документ по товарам из натурального меха", Required: false,
              HelpText: "Добавит к запросу товарную группу furs.", CheckedValue: "furs")]);
 

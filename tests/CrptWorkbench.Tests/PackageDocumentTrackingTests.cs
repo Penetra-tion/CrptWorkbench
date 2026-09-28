@@ -86,7 +86,7 @@ public sealed class PackageDocumentTrackingTests
         Assert.Null(record.NextCheckAtUnixMs);
         await f.Tracker.PollDueAsync(Ct);
         Assert.Equal(1, f.Client.Calls);
-        var history = Assert.Single(await f.Logs.ListAsync(10, Ct));
+        var history = Assert.Single(await f.Logs.ListAsync(f.Profile.Id, 10, Ct));
         Assert.DoesNotContain("private-token", history.RequestHeaders);
         Assert.Contains("Bearer ********", history.RequestHeaders);
         Assert.Equal(f.Client.LastRequest!.CorrelationId, history.CorrelationId);

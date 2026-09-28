@@ -111,6 +111,6 @@ public sealed class ProfileService(
 
 public sealed class HistoryService(IApiRequestLogRepository repository)
 {
-    public Task<IReadOnlyList<ApiRequestLog>> ListAsync(int take = 100, CancellationToken cancellationToken = default) => repository.ListAsync(take, cancellationToken);
-    public Task<ApiRequestLog?> GetAsync(Guid id, CancellationToken cancellationToken = default) => repository.GetAsync(id, cancellationToken);
+    public Task<IReadOnlyList<ApiRequestLog>> ListAsync(Guid profileId, int take = 100, CancellationToken cancellationToken = default) => repository.ListAsync(profileId, take, cancellationToken);
+    public Task<ApiRequestLog?> GetAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default) => repository.GetAsync(profileId, id, cancellationToken);
 }

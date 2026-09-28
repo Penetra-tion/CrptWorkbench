@@ -75,9 +75,18 @@
             </section>
 
             <section class="panel form-section">
-                <span class="eyebrow">СУЗ · mock</span><h2>СУЗ</h2>
-                <div class="form-grid"><label>OmsId<input @bind="_profile.SuzOmsId" maxlength="36" />@FieldError(nameof(CrptProfile.SuzOmsId))</label><label>ConnectionId<input @bind="_profile.SuzConnectionId" maxlength="128" />@FieldError(nameof(CrptProfile.SuzConnectionId))</label></div>
-                <label>Mock Base URL<input @bind="_profile.SuzProductionBaseUrl" />@FieldError(nameof(CrptProfile.SuzProductionBaseUrl))</label>
+                <span class="eyebrow">СУЗ · @(IntegrationOptions.Value.Mode == CrptIntegrationMode.Production ? "боевой контур" : "mock")</span><h2>СУЗ</h2>
+                <div class="form-grid">
+                    <label>OmsId<input @bind="_profile.SuzOmsId" maxlength="36" aria-describedby="suz-oms-help" />@FieldError(nameof(CrptProfile.SuzOmsId))<small id="suz-oms-help" class="muted">Идентификатор вашей СУЗ в формате GUID.</small></label>
+                    <label>ConnectionId<input @bind="_profile.SuzConnectionId" maxlength="128" aria-describedby="suz-connection-help" />@FieldError(nameof(CrptProfile.SuzConnectionId))<small id="suz-connection-help" class="muted">Отдельное подключение (устройство), зарегистрированное вами в СУЗ для Workbench.</small></label>
+                </div>
+                <label>Адрес СУЗ для Production<input @bind="_profile.SuzProductionBaseUrl" placeholder="https://suzgrid.crpt.ru" aria-describedby="suz-url-help" />@FieldError(nameof(CrptProfile.SuzProductionBaseUrl))</label>
+                <small id="suz-url-help" class="muted">Пустое поле использует https://suzgrid.crpt.ru. В Production разрешён только этот HTTPS-адрес на порту 443.</small>
+                <small class="muted">Токен СУЗ получается автоматически по ИНН и сертификату выбранного профиля. Выпуск нового токена аннулирует предыдущий токен того же ConnectionId — используйте отдельное подключение.</small>
+                @if (IntegrationOptions.Value.Mode == CrptIntegrationMode.Mock)
+                {
+                    <small class="muted">В Mock запросы выполняются полностью локально, независимо от этих настроек.</small>
+                }
             </section>
 
             <section class="panel form-section">

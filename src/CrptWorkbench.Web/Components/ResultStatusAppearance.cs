@@ -11,6 +11,14 @@ public sealed record ResultStatusAppearance(string CssClass, string Icon)
     private static readonly ResultStatusAppearance Info = new("tone-info", "i");
     private static readonly ResultStatusAppearance Neutral = new("tone-neutral", "−");
 
+    public static ResultStatusAppearance ForSuzDocument(SuzReceipt item) => item.State switch
+    {
+        "SUCCESS" => Success,
+        "FAILED" => Error,
+        "IN_PROGRESS" or "PARTIALLY" => Waiting,
+        _ => Neutral
+    };
+
     public static ResultStatusAppearance ForCode(CodeInfoItem item) => !CodeInfoResults.IsFound(item)
         ? Error
         : item.CisInfo?.Status switch

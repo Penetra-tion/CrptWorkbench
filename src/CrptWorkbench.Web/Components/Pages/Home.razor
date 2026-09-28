@@ -11,7 +11,7 @@
 
 <div class="page-heading">
     <div><span class="eyebrow">Рабочее пространство</span><h1>Обзор</h1></div>
-    <a class="button primary" href="/console">Открыть API Console</a>
+    <a class="button primary" href="/operations">Открыть операции</a>
 </div>
 
 <div class="notice production-notice"><strong>@TrueApiHeadline</strong> @TrueApiDescription</div>
@@ -44,6 +44,7 @@
 
 @code {
     private CrptProfile? _profile;
+    private int _loadVersion;
     private IReadOnlyList<ApiRequestLog> _history = [];
     private IReadOnlyDictionary<string, string> _names = new Dictionary<string, string>();
     private string _certificateStatus = "Не выбран";
@@ -51,7 +52,7 @@
     private bool IsProduction => IntegrationOptions.Value.Mode == CrptIntegrationMode.Production;
     private string TrueApiHeadline => IsProduction ? "Промышленный контур." : "Локальная симуляция.";
     private string TrueApiDescription => IsProduction
-        ? "True API и Национальный каталог работают с промышленным контуром. СУЗ работает в mock-режиме."
+        ? "True API, Национальный каталог и статус документа СУЗ работают с промышленным контуром. Статус заказа СУЗ (Mock) остаётся локальной демонстрацией."
         : "Все интеграции работают в mock-режиме. Сетевые запросы в Честный Знак не выполняются.";
 
     protected override async Task OnInitializedAsync()
@@ -63,15 +64,22 @@
 
     private async Task LoadAsync()
     {
+        var version = ++_loadVersion;
+        _history = [];
         var profiles = await Profiles.ListAsync();
+        if (version != _loadVersion) return;
         Workbench.ProfileId ??= profiles.FirstOrDefault()?.Id;
         _profile = profiles.FirstOrDefault(x => x.Id == Workbench.ProfileId);
-        _history = await History.ListAsync(5);
+        var profileId = Workbench.ProfileId;
+        var history = profileId is Guid id ? await History.ListAsync(id, 5) : [];
+        if (version != _loadVersion || profileId != Workbench.ProfileId) return;
+        _history = history;
         _certificateStatus = "Не выбран";
         _certificateDetails = "Настройте сертификат в профиле";
         if (!string.IsNullOrWhiteSpace(_profile?.CertificateThumbprint))
         {
             var validation = await Profiles.ValidateCertificateAsync(_profile.CertificateThumbprint);
+            if (version != _loadVersion || profileId != Workbench.ProfileId) return;
             _certificateStatus = validation.IsValid && validation.HasPrivateKey ? "Готов" : "Требует внимания";
             _certificateDetails = validation.Message;
         }

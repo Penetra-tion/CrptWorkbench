@@ -131,6 +131,36 @@ public sealed class CodeInfoTests
     }
 
     [Fact]
+    public async Task MockDocumentHistoryDistinguishesPaymentAndKeepsTechnicalExchanges()
+    {
+        var exchange = await new TrueApiCodeInfoHandler(new MockTrueApiClient()).ExecuteAsync(
+            Input($"{First}\n{Second}"), Context, TestContext.Current.CancellationToken);
+        var items = CodeInfoResults.Parse(exchange.ResponseBody)!.Items;
+        Assert.True(items[0].DocumentHistory!.Paid);
+        Assert.Contains(items[0].DocumentHistory!.Documents, document =>
+            document.Type == "PAYMENT" && document.SenderInn == "0000000000");
+        Assert.False(items[1].DocumentHistory!.Paid);
+        Assert.DoesNotContain(items[1].DocumentHistory!.Documents, document => document.Type == "PAYMENT");
+        Assert.All(exchange.Exchanges!, item =>
+        {
+            Assert.Equal(Context.CorrelationId, item.ResponseHeaders["X-Correlation-Id"]);
+            Assert.Equal("true", item.ResponseHeaders["X-CRPT-Workbench-Mock"]);
+        });
+    }
+
+    [Fact]
+    public async Task HistoryFailureDoesNotTurnUnknownPaymentIntoNo()
+    {
+        var exchange = await new TrueApiCodeInfoHandler(new HistoryFailureClient()).ExecuteAsync(
+            Input(First), Context, TestContext.Current.CancellationToken);
+        var item = Assert.Single(CodeInfoResults.Parse(exchange.ResponseBody)!.Items);
+        Assert.True(CodeInfoResults.IsFound(item));
+        Assert.Null(item.DocumentHistory!.Paid);
+        Assert.Contains("503", item.DocumentHistory.Warning);
+        Assert.Equal(2, exchange.Exchanges!.Count);
+    }
+
+    [Fact]
     public void ResultReaderHandlesNestedErrorsMissingFieldsAndUnknownStatus()
     {
         const string body = "[{\"cisInfo\":{\"requestedCis\":\"one\",\"status\":\"FUTURE_STATUS\",\"custom\":42}},{\"cisInfo\":{\"requestedCis\":\"two\"},\"errorCode\":\"404\",\"errorMessage\":\"КИ не найден\"}]";
@@ -228,6 +258,19 @@ public sealed class CodeInfoTests
             Request = request;
             Token = cancellationToken;
             return Task.FromResult(new IntegrationExchange(200, request.Method, request.Url, request.Headers, request.Body, new Dictionary<string, string>(), "[]", TimeSpan.Zero));
+        }
+    }
+
+    private sealed class HistoryFailureClient : ITrueApiClient
+    {
+        public Uri BaseAddress { get; } = new("https://production.trueapi.mock.invalid");
+
+        public Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
+        {
+            var history = request.Url.Contains("/cises/history?", StringComparison.Ordinal);
+            var body = history ? "{}" : JsonSerializer.Serialize(new[] { new CodeInfoItem(new CisInfo { Cis = First, RequestedCis = First }) });
+            return Task.FromResult(new IntegrationExchange(history ? 503 : 200, request.Method, request.Url,
+                request.Headers, request.Body, new Dictionary<string, string>(), body, TimeSpan.FromMilliseconds(1)));
         }
     }
 }

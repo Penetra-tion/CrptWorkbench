@@ -55,7 +55,7 @@ public sealed class IntegrationModeTests
                 Assert.Equal(200, result.StatusCode);
                 Assert.True(result.Duration > TimeSpan.Zero);
             }
-            var rows = await history.ListAsync(10, ct);
+            var rows = await history.ListAsync(profile.Id, 10, ct);
             Assert.Equal(3, rows.Count);
             Assert.All(rows, row =>
             {

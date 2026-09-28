@@ -351,8 +351,8 @@ public sealed class PackageAggregationTests
         public List<ApiRequestLog> Items { get; } = [];
         public Task AddAsync(ApiRequestLog entry, CancellationToken cancellationToken = default)
         { cancellationToken.ThrowIfCancellationRequested(); Items.Add(entry); return Task.CompletedTask; }
-        public Task<IReadOnlyList<ApiRequestLog>> ListAsync(int take, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ApiRequestLog>>(Items.Take(take).ToArray());
-        public Task<ApiRequestLog?> GetAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Items.SingleOrDefault(x => x.Id == id));
+        public Task<IReadOnlyList<ApiRequestLog>> ListAsync(Guid profileId, int take, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ApiRequestLog>>(Items.Where(x => x.ProfileId == profileId).Take(take).ToArray());
+        public Task<ApiRequestLog?> GetAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Items.SingleOrDefault(x => x.ProfileId == profileId && x.Id == id));
     }
 
     private sealed class RecordingClient(bool mock) : ITrueApiClient

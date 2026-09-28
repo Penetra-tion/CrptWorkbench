@@ -16,7 +16,7 @@ public static class InputValidation
             issues.Add(new(nameof(profile.Inn), "ИНН должен содержать 10 или 12 цифр."));
 
         CheckUrl(profile.NationalCatalogProductionBaseUrl, nameof(profile.NationalCatalogProductionBaseUrl), "Mock Base URL Национального каталога", issues);
-        CheckUrl(profile.SuzProductionBaseUrl, nameof(profile.SuzProductionBaseUrl), "Mock Base URL СУЗ", issues);
+        CheckUrl(profile.SuzProductionBaseUrl, nameof(profile.SuzProductionBaseUrl), "Base URL СУЗ", issues);
         CheckUrl(profile.TrueApiProductionBaseUrl, nameof(profile.TrueApiProductionBaseUrl), "Base URL True API", issues);
 
         var omsId = profile.SuzOmsId?.Trim();
@@ -49,6 +49,9 @@ public static class InputValidation
                     break;
                 case TrueApiDocumentStatusHandler.OperationId:
                     TrueApiDocumentStatusHandler.Parse(values);
+                    break;
+                case SuzDocumentStatusHandler.OperationId:
+                    SuzDocumentStatusHandler.Parse(values);
                     break;
                 case NationalCatalogProductHandler.OperationId:
                     var gtin = values.GetValueOrDefault("gtin")?.Trim() ?? "";

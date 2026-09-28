@@ -40,18 +40,114 @@ public sealed class TrueApiCodeInfoHandler(ITrueApiClient client) : IApiOperatio
         return new(codes.ToArray());
     }
 
-    public Task<IntegrationExchange> ExecuteAsync(IReadOnlyDictionary<string, string> values, ApiOperationContext context, CancellationToken cancellationToken)
+    public async Task<IntegrationExchange> ExecuteAsync(IReadOnlyDictionary<string, string> values, ApiOperationContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var input = Parse(values);
         var baseUrl = client.BaseAddress.AbsoluteUri.TrimEnd('/');
-        return client.ExecuteAsync(new IntegrationRequest(OperationId, "POST", $"{baseUrl}/cises/info",
+        var authentication = new IntegrationAuthenticationContext(context.Profile.Id, context.Profile.Inn, context.Profile.CertificateThumbprint);
+        var infoExchange = await client.ExecuteAsync(new IntegrationRequest(OperationId, "POST", $"{baseUrl}/cises/info",
             new Dictionary<string, string>
             {
                 ["Accept"] = "application/json",
                 ["Content-Type"] = "application/json",
                 ["X-Correlation-Id"] = context.CorrelationId
             }, JsonSerializer.Serialize(input.Codes, JsonOptions), context.CorrelationId,
-            new(context.Profile.Id, context.Profile.Inn, context.Profile.CertificateThumbprint)), cancellationToken);
+            authentication), cancellationToken);
+        if (infoExchange.StatusCode is < 200 or >= 300) return infoExchange;
+        var parsed = CodeInfoResults.Parse(infoExchange.ResponseBody);
+        if (parsed is null) return infoExchange;
+
+        var exchanges = new List<IntegrationExchange> { infoExchange };
+        var histories = new Dictionary<string, CodeDocumentHistory>(StringComparer.Ordinal);
+        var items = new List<CodeInfoItem>(parsed.Items.Count);
+        foreach (var item in parsed.Items)
+        {
+            if (!CodeInfoResults.IsFound(item))
+            {
+                items.Add(item);
+                continue;
+            }
+            var code = item.CisInfo?.Cis ?? item.CisInfo?.RequestedCis;
+            if (string.IsNullOrEmpty(code))
+            {
+                items.Add(item with { DocumentHistory = new(null, [], "Код для запроса истории отсутствует.") });
+                continue;
+            }
+            if (!histories.TryGetValue(code, out var history))
+            {
+                history = await ReadHistoryAsync(code, item.CisInfo?.ProductGroup, baseUrl, context.CorrelationId,
+                    authentication, exchanges, cancellationToken);
+                histories.Add(code, history);
+            }
+            items.Add(item with { DocumentHistory = history });
+        }
+        return infoExchange with
+        {
+            ResponseBody = JsonSerializer.Serialize(items, JsonOptions),
+            Duration = TimeSpan.FromTicks(exchanges.Sum(exchange => exchange.Duration.Ticks)),
+            Exchanges = exchanges
+        };
     }
+
+    private async Task<CodeDocumentHistory> ReadHistoryAsync(string code, string? group, string baseUrl,
+        string correlationId, IntegrationAuthenticationContext authentication, List<IntegrationExchange> exchanges,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var headers = new Dictionary<string, string> { ["Accept"] = "application/json", ["X-Correlation-Id"] = correlationId };
+            var historyExchange = await client.ExecuteAsync(new IntegrationRequest(OperationId, "POST",
+                $"{baseUrl}/cises/history?cis={Uri.EscapeDataString(code)}", headers, null, correlationId, authentication), cancellationToken);
+            exchanges.Add(historyExchange);
+            if (historyExchange.StatusCode == 404) return new(false, []);
+            if (historyExchange.StatusCode is < 200 or >= 300)
+                return new(null, [], $"История документов недоступна (HTTP {historyExchange.StatusCode}).");
+
+            var events = JsonSerializer.Deserialize<CodeHistoryEvent[]>(historyExchange.ResponseBody ?? "", JsonOptions);
+            if (events is null) return new(null, [], "История документов пришла в неизвестном формате.");
+            var documents = new List<CodeHistoryDocument>(events.Length);
+            var details = new Dictionary<string, CodeDocumentDetail?>(StringComparer.Ordinal);
+            var incomplete = false;
+            foreach (var entry in events)
+            {
+                if (entry is null) { incomplete = true; continue; }
+                var id = entry.DocId;
+                if (string.IsNullOrWhiteSpace(id) || id.Length > 256 || id.Any(char.IsControl) ||
+                    id.IndexOfAny(['/', '\\', '%', '?', '#']) >= 0 || id is "." or "..")
+                {
+                    incomplete = true;
+                    documents.Add(new(id, entry.Timestamp ?? entry.OperationDate, null, null, null, null, null, null));
+                    continue;
+                }
+                if (!details.TryGetValue(id, out var detail))
+                {
+                    var path = $"doc/{Uri.EscapeDataString(id)}/info?body=false&content=false";
+                    if (group == "furs") path += "&pg=furs";
+                    var documentExchange = await client.ExecuteAsync(new IntegrationRequest(TrueApiDocumentStatusHandler.OperationId,
+                        "GET", path, headers, null, correlationId, authentication), cancellationToken);
+                    exchanges.Add(documentExchange);
+                    detail = documentExchange.StatusCode is >= 200 and < 300
+                        ? JsonSerializer.Deserialize<CodeDocumentDetail?[]>(documentExchange.ResponseBody ?? "", JsonOptions)?.FirstOrDefault()
+                        : null;
+                    if (detail is null) incomplete = true;
+                    details.Add(id, detail);
+                }
+                documents.Add(new(id, entry.Timestamp ?? entry.OperationDate ?? detail?.ReceivedAt,
+                    detail?.Type, detail?.Status, detail?.SenderName, detail?.SenderInn, detail?.ReceiverName, detail?.ReceiverInn));
+            }
+            var paid = documents.Any(document => string.Equals(document.Type, "PAYMENT", StringComparison.OrdinalIgnoreCase));
+            return new(paid ? true : incomplete ? null : false, documents,
+                incomplete ? "Сведения о части документов недоступны; оплату нельзя определить полностью." : null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception)
+        {
+            return new(null, [], "Не удалось проверить историю документов и оплату.");
+        }
+    }
+
+    private sealed record CodeHistoryEvent(string? DocId, DateTimeOffset? Timestamp, DateTimeOffset? OperationDate);
+    private sealed record CodeDocumentDetail(string? Type, string? Status, DateTimeOffset? ReceivedAt, string? SenderName,
+        string? SenderInn, string? ReceiverName, string? ReceiverInn);
 }

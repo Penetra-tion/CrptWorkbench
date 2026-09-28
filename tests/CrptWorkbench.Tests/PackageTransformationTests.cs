@@ -168,8 +168,8 @@ public sealed class PackageTransformationTests
     private sealed class MemoryLogs : IApiRequestLogRepository
     {
         public Task AddAsync(ApiRequestLog entry, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<IReadOnlyList<ApiRequestLog>> ListAsync(int take, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ApiRequestLog>>([]);
-        public Task<ApiRequestLog?> GetAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<ApiRequestLog?>(null);
+        public Task<IReadOnlyList<ApiRequestLog>> ListAsync(Guid profileId, int take, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ApiRequestLog>>([]);
+        public Task<ApiRequestLog?> GetAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default) => Task.FromResult<ApiRequestLog?>(null);
     }
 
     private sealed class OkHandler : HttpMessageHandler

@@ -116,6 +116,11 @@ public sealed class MockTrueApiClient : ITrueApiClient
             var id = Uri.UnescapeDataString(request.Url[4..request.Url.IndexOf("/info?", StringComparison.Ordinal)]);
             var documents = id switch
             {
+                "demo-code-emission" => new object[] { new { number = id, receivedAt = "2026-09-17T14:33:00Z", type = "EMISSION", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
+                "demo-code-payment" => new object[] { new { number = id, receivedAt = "2026-09-24T03:54:00Z", type = "PAYMENT", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
+                "demo-code-application" => new object[] { new { number = id, receivedAt = "2026-09-24T03:54:00Z", type = "APPLIED", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
+                "demo-code-aggregation" => new object[] { new { number = id, receivedAt = "2026-09-24T04:07:00Z", type = "AGGREGATION_DOCUMENT", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
+                "demo-code-introduction" => new object[] { new { number = id, receivedAt = "2026-09-24T04:28:00Z", type = "LP_INTRODUCE_GOODS", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
                 "demo-success" => new object[] { new { number = id, receivedAt = "2026-09-23T09:15:00Z", type = "LP_INTRODUCE_GOODS", productGroup = new[] { "lp", "shoes" }, status = "ACCEPTED", errors = Array.Empty<string>(), commonErrors = Array.Empty<object>() } },
                 "demo-pending" => new object[] { new { number = id, receivedAt = "2026-09-23T09:16:00Z", type = "LP_INTRODUCE_GOODS", productGroup = new[] { "lp" }, status = "IN_PROGRESS", errors = Array.Empty<string>(), commonErrors = Array.Empty<object>() } },
                 "demo-error" => new object[] { new { number = id, receivedAt = "2026-09-23T09:17:00Z", type = "LP_INTRODUCE_GOODS", productGroup = new[] { "lp" }, status = "PARSE_ERROR", errors = new[] { "Некорректный формат документа" }, commonErrors = new object[] { new { errorMessage = "Некорректный формат документа" }, new { errorMessage = "Отсутствует обязательное поле" } } } },
@@ -124,6 +129,16 @@ public sealed class MockTrueApiClient : ITrueApiClient
             };
             return MockExchangeFactory.ExecuteAsync(ApiSystem.TrueApi, request with { Url = url }, cancellationToken,
                 JsonSerializer.Serialize(documents, JsonOptions));
+        }
+        if (request.OperationId == "true-api.code-info" && request.Url.Contains("/cises/history?cis=", StringComparison.Ordinal))
+        {
+            var code = Uri.UnescapeDataString(request.Url[(request.Url.IndexOf("?cis=", StringComparison.Ordinal) + 5)..]);
+            var ids = code == UnitOne
+                ? new[] { "demo-code-emission", "demo-code-payment", "demo-code-application", "demo-code-aggregation", "demo-code-introduction" }
+                : code == UnitTwo ? new[] { "demo-code-emission", "demo-code-application" } : [];
+            var events = ids.Select((id, index) => new { cis = code, docId = id, timestamp = new DateTimeOffset(2026, 9, 24, 3, 54, 0, TimeSpan.Zero).AddMinutes(index) }).ToArray();
+            return MockExchangeFactory.ExecuteAsync(ApiSystem.TrueApi, request, cancellationToken,
+                JsonSerializer.Serialize(events, JsonOptions), ids.Length == 0 ? 404 : 200);
         }
         if (request.OperationId != "true-api.code-info")
             return MockExchangeFactory.ExecuteAsync(ApiSystem.TrueApi, request, cancellationToken);
@@ -335,6 +350,66 @@ public sealed class MockNationalCatalogClient : INationalCatalogClient
 
 public sealed class MockSuzClient : ISuzClient
 {
-    public Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default) =>
-        MockExchangeFactory.ExecuteAsync(ApiSystem.Suz, request, cancellationToken);
+    public Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (request.OperationId != "suz.document-status")
+            return MockExchangeFactory.ExecuteAsync(ApiSystem.Suz, request, cancellationToken);
+        var uri = new Uri(new Uri("https://production.suz.mock.invalid/"), request.Url);
+        var id = uri.Query.TrimStart('?').Split('&').FirstOrDefault(x => x.StartsWith("resultDocId=", StringComparison.Ordinal))?[12..];
+        if (request.Method != "GET" || request.Body is not null || uri.AbsolutePath != "/api/v3/receipts/receipt" ||
+            !Guid.TryParseExact(id, "D", out _)) throw new ArgumentException("Некорректный запрос квитанции СУЗ.");
+        var state = id switch
+        {
+            "00000000-0000-0000-0000-000000000002" => "FAILED",
+            "00000000-0000-0000-0000-000000000003" => "IN_PROGRESS",
+            "00000000-0000-0000-0000-000000000004" => "PARTIALLY",
+            _ => "SUCCESS"
+        };
+        var results = new List<object>();
+        if (id != "00000000-0000-0000-0000-000000000006") results.Add(Receipt(id!, state, "REPORT_UTILIZE", 1));
+        if (id == "00000000-0000-0000-0000-000000000005") results.Add(Receipt(id, "IN_PROGRESS", "CREATE_ORDER", 2));
+        var headers = new Dictionary<string, string>(request.Headers) { ["clientToken"] = "mock-suz-token-not-a-secret" };
+        return MockExchangeFactory.ExecuteAsync(ApiSystem.Suz, request with
+        {
+            Url = "https://production.suz.mock.invalid" + uri.PathAndQuery,
+            Headers = headers
+        }, cancellationToken, JsonSerializer.Serialize(new { results }));
+    }
+
+    private static object Receipt(string id, string state, string workflow, int number) => new
+    {
+        resultDocId = $"10000000-0000-0000-0000-{number:D12}",
+        resultDocDate = 1790500200000L,
+        sourceDocId = id,
+        sourceDocDate = 1790500000000L,
+        state,
+        code = state switch { "FAILED" => 1, "IN_PROGRESS" => 2, "PARTIALLY" => 3, _ => 0 },
+        description = state switch
+        {
+            "FAILED" => "Документ отклонён: код не принадлежит участнику.",
+            "IN_PROGRESS" => "Документ обрабатывается.",
+            "PARTIALLY" => "Часть кодов обработана с ошибками.",
+            _ => "Документ успешно обработан."
+        },
+        workflow,
+        workflowVersion = 1,
+        details = new { productGroupIds = new[] { 3 }, txType = workflow, quantity = 2 },
+        operations = new[]
+        {
+            new
+            {
+                operationId = "20000000-0000-0000-0000-000000000001",
+                operationType = workflow + "_RECEIVED", operationDate = 1790500000000L,
+                docId = id, details = new { state = "SUCCESS", description = "Документ получен.", errorMessage = (string?)null }
+            },
+            new
+            {
+                operationId = "20000000-0000-0000-0000-000000000002",
+                operationType = "RNMS_GIS_PROCESSED", operationDate = 1790500200000L,
+                docId = id, details = new { state, description = "Проверка кодов.",
+                    errorMessage = state is "FAILED" or "PARTIALLY" ? "Код не принадлежит участнику." : null }
+            }
+        }
+    };
 }

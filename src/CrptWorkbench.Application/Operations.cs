@@ -144,6 +144,8 @@ public sealed class ExecuteApiOperationService(
         Guid profileId,
         CancellationToken cancellationToken = default)
     {
+        if (operationId.Equals(SuzDocumentStatusHandler.OperationId, StringComparison.OrdinalIgnoreCase))
+            InputValidation.Operation(SuzDocumentStatusHandler.OperationId, values).ThrowIfInvalid();
         var profile = await profiles.GetAsync(profileId, cancellationToken)
             ?? throw new InvalidOperationException("Select an existing profile before running an operation.");
         var handler = registry.GetRequired(operationId);
@@ -160,8 +162,10 @@ public sealed class ExecuteApiOperationService(
             var requestHeaders = masker.MaskHeaders(Serialize(exchange.RequestHeaders)) ?? "{}";
             var responseHeaders = masker.MaskHeaders(Serialize(exchange.ResponseHeaders)) ?? "{}";
             var exchanges = (exchange.Exchanges ?? [exchange]).Select(ToApiExchange).ToArray();
+            var invalidSuzResponse = handler.Descriptor.Id == SuzDocumentStatusHandler.OperationId &&
+                exchange.StatusCode is >= 200 and < 300 && SuzDocumentStatusResults.Parse(exchange.ResponseBody) is null;
             var result = new ApiExecutionResult(
-                exchange.StatusCode is >= 200 and < 300,
+                exchange.StatusCode is >= 200 and < 300 && !invalidSuzResponse,
                 exchange.StatusCode,
                 correlationId,
                 exchange.Duration,
@@ -171,7 +175,8 @@ public sealed class ExecuteApiOperationService(
                 masker.MaskBody(exchange.RequestBody),
                 responseHeaders,
                 masker.MaskBody(exchange.ResponseBody),
-                exchange.StatusCode is >= 200 and < 300 ? null : MapHttpError(exchange.StatusCode, handler.Descriptor.System),
+                invalidSuzResponse ? new ApiError("СУЗ вернул некорректную структуру квитанций. Откройте технический вид.", "invalid_response") :
+                    exchange.StatusCode is >= 200 and < 300 ? null : MapHttpError(exchange.StatusCode, handler.Descriptor.System),
                 exchanges);
 
             await history.AddAsync(ToLog(result, handler.Descriptor, profileId, startedAt), cancellationToken);

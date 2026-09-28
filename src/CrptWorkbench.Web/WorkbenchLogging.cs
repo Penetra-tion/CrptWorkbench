@@ -29,7 +29,7 @@ public static class WorkbenchLogging
         var path = new Uri(uri, UriKind.Absolute).AbsolutePath;
         return path switch
         {
-            "/" or "/console" or "/history" or "/settings" or "/tracex" or "/special-features" or "/package-transformation" or "/code-correction" => path,
+            "/" or "/operations" or "/package-aggregation" or "/console" or "/history" or "/settings" or "/tracex" or "/special-features" or "/package-transformation" or "/code-correction" => path,
             _ => "other"
         };
     }

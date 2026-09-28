@@ -148,7 +148,7 @@ public sealed class CodeCorrectionTransportTests
         Assert.Equal("CHECKED_OK", saved.RemoteStatus);
         Assert.Equal(document.DocumentId, saved.DocumentId);
         Assert.Null(saved.NextCheckAtUnixMs);
-        var history = Assert.Single(await logs.ListAsync(10, Ct));
+        var history = Assert.Single(await logs.ListAsync(profile.Id, 10, Ct));
         Assert.Contains("Bearer ********", history.RequestHeaders);
         Assert.DoesNotContain("mock-token-not-a-real-secret", history.RequestHeaders);
         Assert.Contains("X-CRPT-Workbench-Mock", history.ResponseHeaders);

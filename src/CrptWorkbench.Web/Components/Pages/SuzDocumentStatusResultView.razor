@@ -1,0 +1,87 @@
+@using System.Text.Json
+
+<div class="panel-title"><div><span class="eyebrow">Документ СУЗ · Квитирование 2.0</span><h2>@(Results.Results.Count == 0 ? "Квитанции не найдены" : "Результат проверки документа")</h2></div></div>
+@if (Results.Results.Count == 0)
+{
+    <p class="muted" role="status">СУЗ не вернула квитанций для этого GUID. Проверьте идентификатор или повторите запрос позже.</p>
+}
+@foreach (var receipt in Results.Results)
+{
+    var appearance = ResultStatusAppearance.ForSuzDocument(receipt);
+    var errors = SuzDocumentStatusResults.ErrorTexts(receipt);
+    <article class="document-status-item suz-receipt">
+        <div class="document-status-banner @appearance.CssClass" role="status">
+            <span class="outcome-icon" aria-hidden="true">@appearance.Icon</span>
+            <div><span class="outcome-label">Статус документа</span><strong>@SuzDocumentStatusResults.Status(receipt.State)</strong></div>
+        </div>
+        <div class="result-grid document-fields">
+            <article class="result-field"><span>Тип документа</span><strong>@SuzDocumentStatusResults.Workflow(receipt.Workflow)</strong></article>
+            <article class="result-field"><span>GUID документа</span><strong>@receipt.SourceDocId</strong></article>
+            <article class="result-field"><span>Дата документа</span><strong>@SuzDocumentStatusResults.Date(receipt.SourceDocDate)</strong></article>
+            <article class="result-field"><span>GUID квитанции</span><strong>@receipt.ResultDocId</strong></article>
+            <article class="result-field"><span>Дата квитанции</span><strong>@SuzDocumentStatusResults.Date(receipt.ResultDocDate)</strong></article>
+            <article class="result-field"><span>Код результата</span><strong>@receipt.Code</strong></article>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(receipt.Description))
+        {
+            <p class="suz-description">@receipt.Description</p>
+        }
+        @if (errors.Count > 0)
+        {
+            <details class="suz-disclosure result-errors tone-error">
+                <summary class="disclosure-toggle">Ошибки (@errors.Count)</summary>
+                <div class="disclosure-content"><ul>@foreach (var error in errors) { <li>@error</li> }</ul></div>
+            </details>
+        }
+        @if (HasDetails(receipt.Details))
+        {
+            <details class="suz-disclosure">
+                <summary class="disclosure-toggle">Подробности квитанции</summary>
+                <div class="disclosure-content"><pre>@SuzDocumentStatusResults.Json(receipt.Details)</pre></div>
+            </details>
+        }
+        @if (receipt.Operations is { Count: > 0 })
+        {
+            <details class="suz-disclosure">
+                <summary class="disclosure-toggle">Этапы обработки (@receipt.Operations.Count)</summary>
+                <div class="disclosure-content suz-events">
+                    @foreach (var operation in receipt.Operations)
+                    {
+                        <article class="suz-event">
+                            <h3>@operation.OperationType</h3>
+                            <div class="result-grid">
+                                <article class="result-field"><span>Идентификатор этапа</span><strong>@operation.OperationId</strong></article>
+                                <article class="result-field"><span>Дата этапа</span><strong>@SuzDocumentStatusResults.Date(operation.OperationDate)</strong></article>
+                                @if (!string.IsNullOrWhiteSpace(operation.DocId))
+                                {
+                                    <article class="result-field"><span>GUID документа этапа</span><strong>@operation.DocId</strong></article>
+                                }
+                                @if (operation.DocDate is not null)
+                                {
+                                    <article class="result-field"><span>Дата документа этапа</span><strong>@SuzDocumentStatusResults.Date(operation.DocDate)</strong></article>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(operation.DocHash))
+                                {
+                                    <article class="result-field"><span>Хеш документа</span><strong>@operation.DocHash</strong></article>
+                                }
+                            </div>
+                            @if (HasDetails(operation.Details))
+                            {
+                                <details class="suz-disclosure">
+                                    <summary class="disclosure-toggle">Подробности этапа</summary>
+                                    <div class="disclosure-content"><pre>@SuzDocumentStatusResults.Json(operation.Details)</pre></div>
+                                </details>
+                            }
+                        </article>
+                    }
+                </div>
+            </details>
+        }
+    </article>
+}
+
+@code {
+    [Parameter, EditorRequired] public SuzDocumentStatusResults Results { get; set; } = null!;
+
+    private static bool HasDetails(JsonElement? value) => value is { ValueKind: not JsonValueKind.Null and not JsonValueKind.Undefined };
+}

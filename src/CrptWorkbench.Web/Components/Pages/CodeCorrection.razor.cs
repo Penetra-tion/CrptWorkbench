@@ -9,6 +9,11 @@ namespace CrptWorkbench.Web.Components.Pages;
 
 public partial class CodeCorrection
 {
+    private const string FavoriteGroupsOnlyStorageKey = "crpt-workbench-code-correction-favorite-groups-only";
+    private readonly HashSet<string> _favoriteGroupCodes = new(StringComparer.Ordinal);
+    private bool _favoriteGroupsOnly, _savingFavorite;
+    private bool IsFavoriteGroup => _favoriteGroupCodes.Contains(_group);
+    private IEnumerable<CorrectionProductGroup> VisibleGroups => CodeCorrectionRules.Groups.Where(x => !_favoriteGroupsOnly || _favoriteGroupCodes.Contains(x.Code));
     private string _group = "milk", _kind = "productionDate", _value = "";
     private int _operation, _page, _contextVersion, _loadVersion;
     private bool _busy, _disposed, _loadingDocuments, _checkBeforeSending = true;
@@ -43,6 +48,8 @@ public partial class CodeCorrection
         _reference = DotNetObjectReference.Create(this);
         await _module.InvokeVoidAsync("attach", "correction-file-drop", "correction-file");
         await _module.InvokeVoidAsync("attachText", "correction-text", _reference);
+        _favoriteGroupsOnly = await JavaScript.InvokeAsync<bool>("crptWorkbench.getLocalFlag", FavoriteGroupsOnlyStorageKey);
+        await LoadFavoriteGroupsAsync();
         await LoadAsync();
         StateHasChanged();
         _ = RefreshAsync();
@@ -56,6 +63,62 @@ public partial class CodeCorrection
     {
         if (!CodeCorrectionRules.Supports(_group, _kind)) _kind = CodeCorrectionRules.Kinds.First(x => CodeCorrectionRules.Supports(_group, x.Code)).Code;
         KindChanged();
+    }
+    private void NormalizeFavoriteSelection()
+    {
+        if (_favoriteGroupCodes.Count == 0) _favoriteGroupsOnly = false;
+        if (_favoriteGroupsOnly && !IsFavoriteGroup)
+        {
+            _group = VisibleGroups.First().Code;
+            GroupChanged();
+        }
+    }
+    private async Task SetFavoriteGroupsOnlyAsync(bool value)
+    {
+        if (_busy) return;
+        _favoriteGroupsOnly = value;
+        NormalizeFavoriteSelection();
+        if (!_favoriteGroupsOnly && IsFavoriteGroup &&
+            CodeCorrectionRules.Groups.FirstOrDefault(x => !_favoriteGroupCodes.Contains(x.Code)) is { } group)
+        {
+            _group = group.Code;
+            GroupChanged();
+        }
+        await JavaScript.InvokeVoidAsync("crptWorkbench.setLocalFlag", FavoriteGroupsOnlyStorageKey, _favoriteGroupsOnly);
+    }
+    private async Task LoadFavoriteGroupsAsync()
+    {
+        var version = _contextVersion;
+        _favoriteGroupCodes.Clear();
+        try
+        {
+            var codes = Workbench.ProfileId is { } id ? await FavoriteGroups.ListAsync(id, _lifetime.Token) : [];
+            if (!Current(version)) return;
+            foreach (var code in codes)
+                if (CodeCorrectionRules.Groups.Any(x => x.Code == code)) _favoriteGroupCodes.Add(code);
+            NormalizeFavoriteSelection();
+        }
+        catch (OperationCanceledException) when (_disposed) { }
+        catch (Exception) { if (Current(version)) _message = "Не удалось загрузить избранные товарные группы."; }
+    }
+    private async Task ToggleFavoriteGroupAsync()
+    {
+        if (_busy || _savingFavorite || Workbench.ProfileId is not { } id) return;
+        var version = _contextVersion;
+        var group = _group;
+        var favorite = !IsFavoriteGroup;
+        _savingFavorite = true;
+        try
+        {
+            await FavoriteGroups.SetAsync(id, group, favorite, _lifetime.Token);
+            if (!Current(version)) return;
+            if (favorite) _favoriteGroupCodes.Add(group); else _favoriteGroupCodes.Remove(group);
+            NormalizeFavoriteSelection();
+            await JavaScript.InvokeVoidAsync("crptWorkbench.setLocalFlag", FavoriteGroupsOnlyStorageKey, _favoriteGroupsOnly);
+        }
+        catch (OperationCanceledException) when (_disposed) { }
+        catch (Exception) { if (Current(version)) _message = "Не удалось сохранить избранную товарную группу."; }
+        finally { _savingFavorite = false; }
     }
     private void KindChanged()
     {
@@ -74,6 +137,7 @@ public partial class CodeCorrection
     private void ProfileChanged(object? sender, Guid? id) => _ = InvokeAsync(async () =>
     {
         _contextVersion++; Cancel(); _codes.Clear(); Invalidate(); _documents = [];
+        await LoadFavoriteGroupsAsync();
         if (_module is not null) await _module.InvokeVoidAsync("setText", "correction-text", "");
         await LoadAsync(); if (!_disposed) StateHasChanged();
     });

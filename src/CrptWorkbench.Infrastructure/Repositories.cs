@@ -43,16 +43,16 @@ public sealed class ApiRequestLogRepository(IDbContextFactory<WorkbenchDbContext
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyList<ApiRequestLog>> ListAsync(int take, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ApiRequestLog>> ListAsync(Guid profileId, int take, CancellationToken cancellationToken = default)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        return await db.ApiRequestLogs.AsNoTracking().OrderByDescending(x => x.CreatedAtUnixMs).Take(take).ToListAsync(cancellationToken);
+        return await db.ApiRequestLogs.AsNoTracking().Where(x => x.ProfileId == profileId).OrderByDescending(x => x.CreatedAtUnixMs).Take(take).ToListAsync(cancellationToken);
     }
 
-    public async Task<ApiRequestLog?> GetAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<ApiRequestLog?> GetAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        return await db.ApiRequestLogs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        return await db.ApiRequestLogs.AsNoTracking().SingleOrDefaultAsync(x => x.ProfileId == profileId && x.Id == id, cancellationToken);
     }
 }
 

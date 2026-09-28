@@ -14,6 +14,15 @@ public sealed class DocumentStatusTests
 {
     private static readonly ApiOperationContext Context = new(new CrptProfile(), "document-correlation");
 
+    [Fact]
+    public void DescriptorUsesDocumentIdText()
+    {
+        var field = Assert.Single(new TrueApiDocumentStatusHandler(new MockTrueApiClient()).Descriptor.Fields, x => x.Name == "documentId");
+
+        Assert.Equal("ID документа", field.Label);
+        Assert.Equal("ID документа или ИдФайл", field.Placeholder);
+    }
+
     [Theory]
     [InlineData("demo-success", "", "doc/demo-success/info?body=false&content=false")]
     [InlineData("Файл 123", "furs", "doc/%D0%A4%D0%B0%D0%B9%D0%BB%20123/info?body=false&content=false&pg=furs")]
@@ -128,7 +137,7 @@ public sealed class DocumentStatusTests
             var result = await executor.ExecuteAsync(handler.Descriptor.Id, new Dictionary<string, string> { ["documentId"] = "demo-error" }, profile.Id, TestContext.Current.CancellationToken);
             Assert.True(result.Success);
             Assert.Equal("PARSE_ERROR", Assert.Single(DocumentStatusResults.Parse(result.ResponseBody)!.Items).Status);
-            var row = Assert.Single(await history.ListAsync(10, TestContext.Current.CancellationToken));
+            var row = Assert.Single(await history.ListAsync(profile.Id, 10, TestContext.Current.CancellationToken));
             Assert.Equal("GET", row.HttpMethod);
             Assert.Equal(result.CorrelationId, row.CorrelationId);
             Assert.Equal(result.RequestUrl, row.Url);

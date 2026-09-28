@@ -1,0 +1,63 @@
+@page "/operations"
+@inject IApiOperationRegistry Registry
+
+<PageTitle>Операции — CRPT Workbench</PageTitle>
+
+<div class="page-heading">
+    <div><span class="eyebrow">Рабочее пространство</span><h1>Операции</h1></div>
+</div>
+<p class="muted operations-intro">Выберите задачу: получите сведения, подготовьте упаковки или измените данные о кодах.</p>
+
+<section class="operation-group" aria-labelledby="lookup-heading">
+    <h2 id="lookup-heading">Получение сведений</h2>
+    <div class="operation-catalog">
+        @foreach (var operation in Registry.List())
+        {
+            <a class="operation-card" href="@OperationNavigation.ConsoleUrl(operation.Id)">
+                <span class="operation-card-system">@SystemName(operation.System)</span>
+                <h3>@operation.Name</h3>
+                <p>@operation.Description</p>
+            </a>
+        }
+    </div>
+</section>
+
+<section class="operation-group" aria-labelledby="packages-heading">
+    <h2 id="packages-heading">Упаковки</h2>
+    <div class="operation-catalog">
+        <a class="operation-card" href="/package-aggregation">
+            <span class="operation-card-system">True API</span>
+            <h3>Формирование упаковок</h3>
+            <p>Объединение готовых кодов в упаковки и наборы с отслеживанием документов.</p>
+        </a>
+        <a class="operation-card" href="/package-transformation">
+            <span class="operation-card-system">True API</span>
+            <h3>Трансформация упаковок</h3>
+            <p>Добавление или изъятие кодов из упаковок с отслеживанием документов.</p>
+        </a>
+    </div>
+</section>
+
+<section class="operation-group" aria-labelledby="correction-heading">
+    <h2 id="correction-heading">Корректировка</h2>
+    <div class="operation-catalog">
+        <a class="operation-card" href="/code-correction">
+            <span class="operation-card-system">True API</span>
+            <h3>Корректировка сведений о кодах</h3>
+            <p>Изменение сведений с проверкой кодов и отслеживанием отправленного документа.</p>
+        </a>
+    </div>
+</section>
+
+<aside class="operation-upcoming" aria-label="Планируемые возможности">
+    <span class="environment">Скоро</span>
+    <div><strong>Получение полного дерева агрегации</strong><p class="muted">Обход связей упаковок и кодов с объединением результатов.</p></div>
+</aside>
+
+@code {
+    private static string SystemName(ApiSystem system) => system switch
+    {
+        ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог",
+        ApiSystem.Suz => "СУЗ", _ => system.ToString()
+    };
+}

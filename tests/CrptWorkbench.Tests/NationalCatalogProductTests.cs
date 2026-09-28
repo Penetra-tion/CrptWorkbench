@@ -168,7 +168,7 @@ public sealed class NationalCatalogProductTests
             var executor = new ExecuteApiOperationService(new ApiOperationRegistry([handler]), profiles, history, new SensitiveDataMasker());
 
             var result = await executor.ExecuteAsync(handler.Descriptor.Id, new Dictionary<string, string> { ["gtin"] = "04600000000000" }, profile.Id, cancellationToken);
-            var row = Assert.Single(await history.ListAsync(10, cancellationToken));
+            var row = Assert.Single(await history.ListAsync(profile.Id, 10, cancellationToken));
             Assert.True(result.Success);
             Assert.Equal(result.CorrelationId, row.CorrelationId);
             Assert.Contains("X-CRPT-Workbench-Mock", row.ExchangesJson!);

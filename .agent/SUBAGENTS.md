@@ -11,7 +11,7 @@ Use subagents selectively. They are appropriate for complex or multi-layer work,
 - Communicate in Russian by default unless the task requests another language.
 - Lead with outcomes and evidence. Distinguish repository facts, assumptions, and checks that were not run.
 - Preserve the dependency direction, secret-handling rules, migration policy, dirty-worktree protections, and verification commands from `AGENTS.md`.
-- Mock remains the default mode. Production National Catalog access is limited to the approved own-card lookup endpoints; SUZ is mock-only.
+- Mock remains the default mode. Production National Catalog access is limited to the approved own-card lookup endpoints; SUZ production is limited to the document receipt GET and separate authentication explicitly allowlisted in AGENTS.md; the legacy order-status demo stays Mock.
 - The already approved production True API path may be changed or tested only within its configuration gate, exact host and method/path allowlist, redirect restrictions, masking rules, in-memory token handling, and CryptoPro cleanup requirements.
 - Never add or authorize a new authentic endpoint, host, integration, credential flow, or production network effect without an explicit user request.
 - The focused automated test project is `tests/CrptWorkbench.Tests`. All tests must pass; use the dated baseline recorded in `AGENTS.md` and update it when the suite intentionally changes.

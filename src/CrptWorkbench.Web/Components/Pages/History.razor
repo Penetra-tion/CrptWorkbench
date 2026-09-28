@@ -2,6 +2,7 @@
 @using System.Text.Json
 @using Microsoft.AspNetCore.WebUtilities
 @inject HistoryService HistoryService
+@inject WorkbenchContext Workbench
 @inject IApiOperationRegistry Registry
 @inject NavigationManager Navigation
 @implements IDisposable
@@ -12,7 +13,7 @@
 
 <div class="history-grid @(_items.Count == 0 && !_missing ? "history-empty" : null)">
     <section class="panel history-list">
-        @if (_items.Count == 0) { <div class="empty">История пуста.</div> }
+        @if (_items.Count == 0) { <div class="empty">История выбранного профиля пуста.</div> }
         else
         {
             <table><thead><tr><th>Время</th><th>Система</th><th>Операция</th><th>Статус</th><th>мс</th></tr></thead>
@@ -28,7 +29,7 @@
     @if (_items.Count > 0 || _missing)
     {
     <section class="panel detail">
-        @if (_missing) { <div class="notice error" role="alert">Запись не найдена. Выберите другой запрос в списке.</div> }
+        @if (_missing) { <div class="notice error" role="alert">Запись не найдена в выбранном профиле. Выберите другой запрос в списке.</div> }
         else if (_selected is null) { <div class="empty">Выберите запрос в списке.</div> }
         else
         {
@@ -44,6 +45,7 @@
                 @if (_result?.Codes is not null) { <CodeInfoResultView Results="_result.Codes" OnCodeSelected="RequestRelatedCode" /> }
                 else if (_result?.Product is not null) { <NationalCatalogProductResultView Result="_result.Product" /> }
                 else if (_result?.Documents is not null) { <DocumentStatusResultView Results="_result.Documents" /> }
+                else if (_result?.SuzDocuments is not null) { <SuzDocumentStatusResultView Results="_result.SuzDocuments" /> }
                 else if (_result?.Fields.Count > 0)
                 {
                     <div class="result-grid">
@@ -86,28 +88,42 @@
     private SavedResultView? _result;
     private bool _technicalMode;
     private bool _missing;
+    private int _loadVersion;
+    private int _selectionVersion;
 
     protected override async Task OnInitializedAsync()
     {
         _names = Registry.List().ToDictionary(x => x.Id, x => x.Name, StringComparer.OrdinalIgnoreCase);
         Navigation.LocationChanged += OnLocationChanged;
+        Workbench.ProfileChanged += OnProfileChanged;
         await LoadAsync();
     }
 
     private async Task LoadAsync()
     {
-        _items = await HistoryService.ListAsync();
+        var version = ++_loadVersion;
+        var profileId = Workbench.ProfileId;
+        _items = [];
+        SetSelected(null, false);
+        StateHasChanged();
+        var items = profileId is Guid id ? await HistoryService.ListAsync(id) : [];
+        if (version != _loadVersion || profileId != Workbench.ProfileId) return;
+        _items = items;
         await SelectFromUrlAsync();
     }
 
     private async Task SelectFromUrlAsync()
     {
+        var version = ++_selectionVersion;
+        var profileId = Workbench.ProfileId;
+        if (profileId is null) { SetSelected(null, false); return; }
         var query = QueryHelpers.ParseQuery(Navigation.ToAbsoluteUri(Navigation.Uri).Query);
         if (query.TryGetValue("id", out var rawId))
         {
             if (Guid.TryParse(rawId.ToString(), out var id))
             {
-                var item = _items.FirstOrDefault(x => x.Id == id) ?? await HistoryService.GetAsync(id);
+                var item = _items.FirstOrDefault(x => x.Id == id) ?? await HistoryService.GetAsync(profileId.Value, id);
+                if (version != _selectionVersion || profileId != Workbench.ProfileId) return;
                 SetSelected(item, item is null);
             }
             else SetSelected(null, true);
@@ -118,6 +134,12 @@
     private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => _ = InvokeAsync(async () =>
     {
         await SelectFromUrlAsync();
+        StateHasChanged();
+    });
+
+    private void OnProfileChanged(object? sender, Guid? profileId) => _ = InvokeAsync(async () =>
+    {
+        await LoadAsync();
         StateHasChanged();
     });
 
@@ -155,5 +177,11 @@
         catch (JsonException) { return []; }
     }
 
-    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+    public void Dispose()
+    {
+        ++_loadVersion;
+        ++_selectionVersion;
+        Navigation.LocationChanged -= OnLocationChanged;
+        Workbench.ProfileChanged -= OnProfileChanged;
+    }
 }

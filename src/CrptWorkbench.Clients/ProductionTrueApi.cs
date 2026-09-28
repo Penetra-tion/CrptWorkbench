@@ -145,8 +145,12 @@ public sealed class RealTrueApiClient(
             throw new InvalidOperationException("Document info is a read-only GET request.");
         if (PackageCreationRequest.IsCreation(request.OperationId)) PackageCreationRequest.Validate(request);
         if (request.OperationId == "true-api.code-info" &&
-            (request.Method != "POST" || request.Url != $"{CrptIntegrationOptions.ProductionTrueApiBaseUrl}/cises/info"))
+            (request.Method != "POST" ||
+             (request.Url != $"{CrptIntegrationOptions.ProductionTrueApiBaseUrl}/cises/info" &&
+              !CodeHistoryRequestUri.IsAllowed(request.Url))))
             throw new InvalidOperationException("Invalid code information request.");
+        if (request.OperationId == "true-api.code-info" && request.Url != $"{CrptIntegrationOptions.ProductionTrueApiBaseUrl}/cises/info" && request.Body is not null)
+            throw new InvalidOperationException("Code history must not include a request body.");
         var authentication = request.Authentication ?? throw new InvalidOperationException("True API authentication context is missing.");
         var stopwatch = Stopwatch.StartNew();
         var token = await tokens.GetTokenAsync(authentication, request.CorrelationId, cancellationToken);
@@ -217,6 +221,8 @@ public sealed class RealTrueApiClient(
 
 public static class HttpClientNames
 {
+    public const string SuzProduction = "SuzProduction";
+    public const string SuzAuthentication = "SuzAuthentication";
     public const string TrueApiProduction = "TrueApiProduction";
     public const string NationalCatalogProduction = "NationalCatalogProduction";
 }

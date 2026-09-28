@@ -8,7 +8,8 @@
 @inject IJSRuntime JavaScript
 
 <PageTitle>Формирование упаковок — CRPT Workbench</PageTitle>
-<div class="page-heading"><div><span class="eyebrow">Специальные возможности</span><h1>Формирование упаковок</h1></div></div>
+<a class="operations-back" href="/operations"><span aria-hidden="true">←</span><span>Все операции</span></a>
+<div class="page-heading"><div><span class="eyebrow">Операции</span><h1>Формирование упаковок</h1></div></div>
 
 <div class="package-page">
 <section class="panel form-section">
@@ -213,6 +214,8 @@
         _favoriteGroupsOnly = favoriteOnly && SupportedGroups.Any(x => _favoriteGroupCodes.Contains(x.Code));
         if (_favoriteGroupsOnly && !_favoriteGroupCodes.Contains(_group))
             _group = VisibleGroups.FirstOrDefault().Code ?? _group;
+        if (!_favoriteGroupsOnly && _favoriteGroupCodes.Contains(_group))
+            _group = SupportedGroups.FirstOrDefault(x => !_favoriteGroupCodes.Contains(x.Code)).Code ?? _group;
         await JavaScript.InvokeVoidAsync("crptWorkbench.setLocalFlag", FavoriteGroupsOnlyStorageKey, _favoriteGroupsOnly);
     }
     private async Task ToggleFavoriteGroupAsync()

@@ -64,6 +64,7 @@ try
     builder.Services.AddSingleton<ICertificateSignatureService, CryptoProCertificateSignatureService>();
     builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<ITrueApiTokenProvider, TrueApiTokenProvider>();
+    builder.Services.AddSingleton<ISuzTokenProvider, SuzTokenProvider>();
     builder.Services.AddSingleton<ITraceXDbConnectionFactory, TraceXDbConnectionFactory>();
     builder.Services.AddSingleton<ITraceXConnectionStringValidator, TraceXConnectionStringValidator>();
     builder.Services.AddSingleton(new TraceXConnectionTesterOptions(TimeSpan.FromSeconds(10)));
@@ -73,7 +74,7 @@ try
     builder.Services.AddScoped<IApiOperationHandler, TrueApiCodeInfoHandler>();
     builder.Services.AddScoped<IApiOperationHandler, TrueApiDocumentStatusHandler>();
     builder.Services.AddScoped<IApiOperationHandler, NationalCatalogProductHandler>();
-    builder.Services.AddScoped<IApiOperationHandler, SuzDemoHandler>();
+    builder.Services.AddScoped<IApiOperationHandler, SuzDocumentStatusHandler>();
     builder.Services.AddScoped<IApiOperationRegistry, ApiOperationRegistry>();
     builder.Services.AddScoped<ExecuteApiOperationService>();
     builder.Services.AddScoped<FavoriteApiOperationService>();
@@ -95,6 +96,23 @@ try
     builder.Services.AddTransient<ProductionNationalCatalogNetworkGuardHandler>();
     builder.Services.AddTransient<CorrelationIdHandler>();
     builder.Services.AddTransient<LoggingHandler>();
+    builder.Services.AddTransient<ProductionSuzNetworkGuardHandler>();
+    builder.Services.AddTransient<SuzAuthenticationNetworkGuardHandler>();
+    builder.Services.AddTransient<SuzSafeLoggingHandler>();
+    builder.Services.AddHttpClient(HttpClientNames.SuzProduction)
+        .RemoveAllLoggers()
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+        .AddHttpMessageHandler<MockOnlyNetworkGuardHandler>()
+        .AddHttpMessageHandler<ProductionSuzNetworkGuardHandler>()
+        .AddHttpMessageHandler<CorrelationIdHandler>()
+        .AddHttpMessageHandler<SuzSafeLoggingHandler>();
+    builder.Services.AddHttpClient(HttpClientNames.SuzAuthentication)
+        .RemoveAllLoggers()
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+        .AddHttpMessageHandler<MockOnlyNetworkGuardHandler>()
+        .AddHttpMessageHandler<SuzAuthenticationNetworkGuardHandler>()
+        .AddHttpMessageHandler<CorrelationIdHandler>()
+        .AddHttpMessageHandler<SuzSafeLoggingHandler>();
     builder.Services.AddHttpClient("CrptPipeline")
         .AddHttpMessageHandler<MockOnlyNetworkGuardHandler>()
         .AddHttpMessageHandler<CorrelationIdHandler>()

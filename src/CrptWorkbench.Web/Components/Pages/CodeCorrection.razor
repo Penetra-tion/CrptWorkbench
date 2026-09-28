@@ -1,21 +1,35 @@
 @page "/code-correction"
 @implements IAsyncDisposable
 @inject CodeCorrectionService Corrections
+@inject FavoriteProductGroupService FavoriteGroups
 @inject PackageDocumentTracker DocumentTracker
 @inject WorkbenchContext Workbench
 @inject IJSRuntime JavaScript
 @inject IOptions<CrptIntegrationOptions> IntegrationOptions
 
 <PageTitle>Корректировка сведений о кодах — CRPT Workbench</PageTitle>
-<div class="page-heading"><div><span class="eyebrow">Специальные возможности</span><h1>Корректировка сведений о кодах</h1></div></div>
+<a class="operations-back" href="/operations"><span aria-hidden="true">←</span><span>Все операции</span></a>
+<div class="page-heading"><div><span class="eyebrow">Операции</span><h1>Корректировка сведений о кодах</h1></div></div>
 <div class="correction-page">
 <section class="panel">
     <h2>Новые сведения</h2>
     <p class="muted">Одна товарная группа и одинаковые новые значения для всех кодов. Будет отправлен один документ.</p>
     <fieldset disabled="@_busy">
     <div class="form-grid">
-        <label>Товарная группа<select @bind="_group" @bind:after="GroupChanged">@foreach (var group in CodeCorrectionRules.Groups) { <option value="@group.Code">@group.Name</option> }</select></label>
         <label>Что изменить<select @bind="_kind" @bind:after="KindChanged">@foreach (var kind in CodeCorrectionRules.Kinds.Where(x => CodeCorrectionRules.Supports(_group, x.Code))) { <option value="@kind.Code">@kind.Name</option> }</select></label>
+        <div class="product-group-field">
+            <span class="product-group-head">
+                <label for="correction-product-group">Товарная группа</label>
+                <span class="package-group-filter" role="group" aria-label="Фильтр товарных групп">
+                    <button type="button" class="@(!_favoriteGroupsOnly ? "active" : null)" @onclick="() => SetFavoriteGroupsOnlyAsync(false)">Все</button>
+                    <button type="button" class="@(_favoriteGroupsOnly ? "active" : null)" @onclick="() => SetFavoriteGroupsOnlyAsync(true)" disabled="@(_favoriteGroupCodes.Count == 0)">Избранные</button>
+                </span>
+            </span>
+            <div class="product-group-picker">
+                <select @key="_favoriteGroupsOnly" id="correction-product-group" @bind="_group" @bind:after="GroupChanged">@foreach (var group in VisibleGroups) { <option value="@group.Code">@group.Name</option> }</select>
+                <button type="button" class="favorite-toggle product-group-favorite @(IsFavoriteGroup ? "active" : null)" @onclick="ToggleFavoriteGroupAsync" disabled="@(Workbench.ProfileId is null || _savingFavorite)" aria-label="@(IsFavoriteGroup ? "Удалить товарную группу из избранного" : "Добавить товарную группу в избранное")" title="@(IsFavoriteGroup ? "Удалить из избранного" : "Добавить в избранное")">@(IsFavoriteGroup ? "★" : "☆")</button>
+            </div>
+        </div>
     </div>
     <p class="notice">@CodeCorrectionRules.Describe(_group, _kind)</p>
     @if (_kind is "permitDocs" or "licences")

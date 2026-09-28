@@ -1,4 +1,6 @@
 @using System.Globalization
+@implements IAsyncDisposable
+@inject IJSRuntime JavaScript
 
 <div class="panel-title">
     <div><span class="eyebrow">Результат проверки кодов</span>
@@ -10,7 +12,7 @@
     <span>Найдено <strong>@Results.FoundCount</strong></span>
     <span class="@(Results.ErrorCount > 0 ? "metric-errors" : null)">@if (Results.ErrorCount > 0) { <span aria-hidden="true">! </span> }Ошибок <strong>@Results.ErrorCount</strong></span>
 </div>
-<div class="code-result-list">
+<div class="code-result-list" @ref="_resultList">
     @foreach (var item in Results.Items)
     {
         var info = item.CisInfo;
@@ -39,7 +41,13 @@
                 <dl class="code-primary-fields">
                     <div><dt>GTIN</dt><dd>@GtinValue(info)</dd></div>
                     <div><dt>Владелец</dt><dd>@(info.OwnerName ?? "—") @if (info.OwnerInn is not null) { <small class="muted">ИНН @info.OwnerInn</small> }</dd></div>
+                    @if (packageCode is "UNIT" or "GROUP" or "SET")
+                    {
+                        <div><dt>Оплата кода</dt><dd>@PaymentLabel(item.DocumentHistory)</dd></div>
+                    }
                 </dl>
+                @if (HasDetails(item))
+                {
                 <details class="code-details" open="@(Results.Items.Count == 1)">
                     <summary class="disclosure-toggle">Подробные сведения</summary>
                     <div class="disclosure-content">
@@ -48,43 +56,47 @@
                             <div class="requested-code"><span class="eyebrow">Код из ответа</span><code>@info.Cis</code></div>
                         }
                         <div class="code-detail-sections">
-                        <section class="code-detail-section">
-                            <h4>Даты и сроки</h4>
-                            <dl class="code-detail-grid">
-                                <div class="detail-field"><dt>Дата нанесения</dt><dd>@ApplicationDateValue(info)</dd></div>
-                                <div class="detail-field"><dt>Дата эмиссии</dt><dd>@FormatDate(info.EmissionDate)</dd></div>
-                                <div class="detail-field">
-                                    <dt>Товарная группа</dt>
-                                    <dd>@(info.ProductGroup ?? "—")
-                                        @if (info.ProductGroupId.HasValue) { <small class="muted">ID @info.ProductGroupId</small> }
-                                    </dd>
+                        @if (item.DocumentHistory?.Documents is { Count: > 0 })
+                        {
+                        <details class="code-detail-section code-history-section code-detail-disclosure">
+                            <summary class="disclosure-toggle">Документы по коду</summary>
+                            <div class="disclosure-content">
+                            @if (item.DocumentHistory?.Documents is { Count: > 0 } documents)
+                            {
+                                <div class="code-history-scroll">
+                                    <table class="code-history-table">
+                                        <thead><tr><th>Операция</th><th>Дата обработки</th><th>Идентификатор</th><th>Отправитель</th><th>Получатель</th></tr></thead>
+                                        <tbody>
+                                            @foreach (var document in documents)
+                                            {
+                                                <tr>
+                                                    <td>@DocumentTypeLabel(document.Type) @if (!string.IsNullOrWhiteSpace(document.Status)) { <small class="muted">@DocumentStatusResults.Status(document.Status)</small> }</td>
+                                                    <td>@FormatDate(document.ProcessedAt)</td>
+                                                    <td class="code-history-id">@(document.DocumentId ?? "—")</td>
+                                                    <td>@PartyLabel(document.SenderName, document.SenderInn)</td>
+                                                    <td>@PartyLabel(document.ReceiverName, document.ReceiverInn)</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
                                 </div>
-                                <div class="detail-field detail-field-wide">
-                                    <dt>Срок годности</dt>
-                                    <dd>
-                                        @if (info.Expirations is { Count: > 0 })
-                                        {
-                                            <div class="expiration-list">
-                                                @foreach (var expiration in info.Expirations)
-                                                {
-                                                    <article class="detail-card">
-                                                        <strong>@FormatDate(expiration.ExpirationStorageDate)</strong>
-                                                        @if (expiration.StorageConditionId.HasValue) { <span>Условие хранения: @expiration.StorageConditionId</span> }
-                                                        @if (!string.IsNullOrWhiteSpace(expiration.StorageConditionName)) { <span>@expiration.StorageConditionName</span> }
-                                                    </article>
-                                                }
-                                            </div>
-                                        }
-                                        else
-                                        {
-                                            @FormatDate(info.ExpirationDate)
-                                        }
-                                    </dd>
-                                </div>
-                            </dl>
-                        </section>
-                        <section class="code-detail-section">
-                            <h4>Разрешительные документы</h4>
+                            }
+                            else
+                            {
+                                <p class="muted">@(item.DocumentHistory is null ? "История документов не запрашивалась." : item.DocumentHistory.Warning is null ? "Документы не найдены." : "Документы недоступны.")</p>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(item.DocumentHistory?.Warning))
+                            {
+                                <p class="muted">@item.DocumentHistory.Warning</p>
+                            }
+                            </div>
+                        </details>
+                        }
+                        @if (HasPermits(info))
+                        {
+                        <details class="code-detail-section code-detail-disclosure">
+                            <summary class="disclosure-toggle">Разрешительные документы</summary>
+                            <div class="disclosure-content">
                             @if (info.CertDoc is { Count: > 0 })
                             {
                                 <div class="permit-list">
@@ -117,9 +129,54 @@
                             {
                                 <span>—</span>
                             }
-                        </section>
-                        <section class="code-detail-section code-relations">
-                            <h4>Состав и родительская упаковка</h4>
+                            </div>
+                        </details>
+                        }
+                        @if (HasDates(info))
+                        {
+                        <details class="code-detail-section code-detail-disclosure">
+                            <summary class="disclosure-toggle">Даты и сроки</summary>
+                            <div class="disclosure-content">
+                            <dl class="code-detail-grid">
+                                <div class="detail-field"><dt>Дата нанесения</dt><dd>@ApplicationDateValue(info)</dd></div>
+                                <div class="detail-field"><dt>Дата эмиссии</dt><dd>@FormatDate(info.EmissionDate)</dd></div>
+                                <div class="detail-field">
+                                    <dt>Товарная группа</dt>
+                                    <dd>@(info.ProductGroup ?? "—")
+                                        @if (info.ProductGroupId.HasValue) { <small class="muted">ID @info.ProductGroupId</small> }
+                                    </dd>
+                                </div>
+                                <div class="detail-field detail-field-wide">
+                                    <dt>Срок годности</dt>
+                                    <dd>
+                                        @if (info.Expirations is { Count: > 0 })
+                                        {
+                                            <div class="expiration-list">
+                                                @foreach (var expiration in info.Expirations)
+                                                {
+                                                    <article class="detail-card">
+                                                        <strong>@FormatDate(expiration.ExpirationStorageDate)</strong>
+                                                        @if (expiration.StorageConditionId.HasValue) { <span>Условие хранения: @expiration.StorageConditionId</span> }
+                                                        @if (!string.IsNullOrWhiteSpace(expiration.StorageConditionName)) { <span>@expiration.StorageConditionName</span> }
+                                                    </article>
+                                                }
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            @FormatDate(info.ExpirationDate)
+                                        }
+                                    </dd>
+                                </div>
+                            </dl>
+                            </div>
+                        </details>
+                        }
+                        @if (HasRelations(info))
+                        {
+                        <details class="code-detail-section code-relations code-detail-disclosure">
+                            <summary class="disclosure-toggle">Состав и родительская упаковка</summary>
+                            <div class="disclosure-content">
                             <dl class="code-detail-grid">
                                 <div class="detail-field detail-field-wide">
                                     <dt>Вложения</dt>
@@ -138,10 +195,13 @@
                                 </div>
                                 <div class="detail-field detail-field-wide"><dt>Родительская упаковка</dt><dd>@if (string.IsNullOrWhiteSpace(info.Parent)) { <span>—</span> } else { <button type="button" class="related-code-link" disabled="@Busy" title="Запросить сведения по коду" @onclick="() => OnCodeSelected.InvokeAsync(info.Parent)"><code>@info.Parent</code></button> }</dd></div>
                             </dl>
-                        </section>
+                            </div>
+                        </details>
+                        }
                         </div>
                     </div>
                 </details>
+                }
             }
         </article>
     }
@@ -152,7 +212,65 @@
     [Parameter] public EventCallback<string> OnCodeSelected { get; set; }
     [Parameter] public bool Busy { get; set; }
 
+    private ElementReference _resultList;
+    private IJSObjectReference? _disclosureModule;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _disclosureModule = await JavaScript.InvokeAsync<IJSObjectReference>("import", "./js/code-result-disclosures.js");
+        await _disclosureModule.InvokeVoidAsync("attach", _resultList);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disclosureModule is null) return;
+        try
+        {
+            await _disclosureModule.InvokeVoidAsync("detach", _resultList);
+            await _disclosureModule.DisposeAsync();
+        }
+        catch (JSDisconnectedException) { }
+    }
+
     private static bool OmitsProductDetails(CisInfo? info) => CodeInfoResults.PackageTypeCode(info) is "BOX" or "ATK";
+
+    private static bool HasDetails(CodeInfoItem item) => item.CisInfo is { } info &&
+        (item.DocumentHistory?.Documents is { Count: > 0 } || HasDates(info) || HasPermits(info) || HasRelations(info) ||
+         !string.IsNullOrWhiteSpace(info.Cis) && info.Cis != info.RequestedCis);
+
+    private static bool HasDates(CisInfo info) => info.ApplicationDate.HasValue || info.EmissionDate.HasValue ||
+        info.ExpirationDate.HasValue || info.Expirations is { Count: > 0 } ||
+        !string.IsNullOrWhiteSpace(info.ProductGroup) || info.ProductGroupId.HasValue;
+
+    private static bool HasPermits(CisInfo info) => info.CertDoc is { Count: > 0 } ||
+        info.CertDocRequirementDetails is not null;
+
+    private static bool HasRelations(CisInfo info) => info.Child is { Count: > 0 } ||
+        !string.IsNullOrWhiteSpace(info.Parent);
+
+    private static string PaymentLabel(CodeDocumentHistory? history) => history is null ? "Не запрашивалась" : history.Paid switch
+    {
+        true => "Оплачен",
+        false => "Не оплачен",
+        null => "Не удалось проверить"
+    };
+
+    private static string DocumentTypeLabel(string? type) => type switch
+    {
+        "EMISSION" => "Эмиссия",
+        "PAYMENT" => "Оплата",
+        "APPLIED" => "Нанесение",
+        "AGGREGATION_DOCUMENT" => "Формирование упаковки",
+        "SETS_AGGREGATION" => "Формирование набора",
+        "LP_INTRODUCE_GOODS" => "Ввод в оборот",
+        null or "" => "Тип не указан",
+        _ => DocumentStatusResults.Type(type)
+    };
+
+    private static string PartyLabel(string? name, string? inn) =>
+        string.IsNullOrWhiteSpace(name) ? string.IsNullOrWhiteSpace(inn) ? "—" : $"ИНН {inn}" :
+        string.IsNullOrWhiteSpace(inn) ? name : $"{name} · ИНН {inn}";
 
     private static string ProductTitle(CisInfo? info) => !string.IsNullOrWhiteSpace(info?.ProductName)
         ? info.ProductName

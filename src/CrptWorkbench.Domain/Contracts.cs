@@ -10,8 +10,8 @@ public interface IProfileRepository
 public interface IApiRequestLogRepository
 {
     Task AddAsync(ApiRequestLog entry, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<ApiRequestLog>> ListAsync(int take, CancellationToken cancellationToken = default);
-    Task<ApiRequestLog?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ApiRequestLog>> ListAsync(Guid profileId, int take, CancellationToken cancellationToken = default);
+    Task<ApiRequestLog?> GetAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default);
 }
 
 public interface IFavoriteApiOperationRepository
@@ -93,7 +93,8 @@ public sealed record IntegrationRequest(
     IReadOnlyDictionary<string, string> Headers,
     string? Body,
     string CorrelationId,
-    IntegrationAuthenticationContext? Authentication = null);
+    IntegrationAuthenticationContext? Authentication = null,
+    SuzConnectionContext? SuzConnection = null);
 
 public sealed record IntegrationExchange(
     int StatusCode,

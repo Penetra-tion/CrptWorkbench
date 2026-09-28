@@ -10,7 +10,8 @@ public sealed record SavedResultView(
     NationalCatalogProductResult? Product,
     DocumentStatusResults? Documents,
     IReadOnlyList<SavedResultField> Fields,
-    string? Notice)
+    string? Notice,
+    SuzDocumentStatusResults? SuzDocuments = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -26,6 +27,7 @@ public sealed record SavedResultView(
                 TrueApiCodeInfoHandler.OperationId => FromCodes(log),
                 NationalCatalogProductHandler.OperationId => FromProduct(log),
                 TrueApiDocumentStatusHandler.OperationId => FromDocuments(log),
+                SuzDocumentStatusHandler.OperationId => FromSuzDocuments(log),
                 "suz.order-status" => FromSuz(log),
                 _ => new(null, null, null, [], "Для этой операции нет обычного представления. Откройте технический вид.")
             };
@@ -70,6 +72,14 @@ public sealed record SavedResultView(
             }, x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() ?? "—" : x.Value.ToString()))
             .ToArray();
         return fields.Length == 0 ? Invalid() : new(null, null, null, fields, null);
+    }
+
+    private static SavedResultView FromSuzDocuments(ApiRequestLog log)
+    {
+        if (!log.Success) return new(null, null, null, [], log.Error ?? "Запрос СУЗ не выполнен. Откройте технический вид.");
+        var result = SuzDocumentStatusResults.Parse(log.ResponseBody);
+        return result is null ? new(null, null, null, [], log.Error ?? "Некорректный ответ СУЗ. Откройте технический вид.")
+            : new(null, null, null, [], null, result);
     }
 
     private static SavedResultView Invalid() => new(null, null, null, [], "Не удалось прочитать сохранённый ответ. Откройте технический вид.");

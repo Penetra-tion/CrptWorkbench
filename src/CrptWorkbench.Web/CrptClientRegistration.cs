@@ -11,13 +11,14 @@ public static class CrptClientRegistration
         {
             services.AddSingleton<ITrueApiClient, RealTrueApiClient>();
             services.AddSingleton<INationalCatalogClient, RealNationalCatalogClient>();
+            services.AddSingleton<ISuzClient, RealSuzClient>();
         }
         else
         {
             services.AddSingleton<ITrueApiClient, MockTrueApiClient>();
             services.AddSingleton<INationalCatalogClient, MockNationalCatalogClient>();
+            services.AddSingleton<ISuzClient, MockSuzClient>();
         }
-        services.AddSingleton<ISuzClient, MockSuzClient>();
         return services;
     }
 }

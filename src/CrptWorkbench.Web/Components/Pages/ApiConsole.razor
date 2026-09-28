@@ -2,7 +2,6 @@
 @page "/console"
 @implements IDisposable
 @using System.Text.Json
-@using Microsoft.AspNetCore.WebUtilities
 @inject IApiOperationRegistry Registry
 @inject ExecuteApiOperationService Executor
 @inject ProfileService Profiles
@@ -12,13 +11,18 @@
 @inject IOptions<CrptIntegrationOptions> IntegrationOptions
 @inject NavigationManager Navigation
 
-<PageTitle>API Console — CRPT Workbench</PageTitle>
+<PageTitle>Получение сведений — CRPT Workbench</PageTitle>
 
+<a class="operations-back" href="/operations"><span aria-hidden="true">←</span><span>Все операции</span></a>
 <div class="page-heading console-heading">
-    <div><span class="eyebrow">Операции Честного Знака</span><h1>API Console</h1></div>
+    <div><span class="eyebrow">Операции</span><h1>Получение сведений</h1></div>
 </div>
 
 <div class="notice production-notice"><strong>@ModeHeadline</strong> @ModeDescription</div>
+@if (_unknownOperation)
+{
+    <div class="notice error" role="alert">Операция не найдена. <a href="/operations">Выберите задачу в каталоге операций.</a></div>
+}
 
 <div class="tabs system-tabs" role="tablist" aria-label="Система API">
     <button type="button" role="tab" disabled="@_running" aria-selected="@_favoritesView" class="@(_favoritesView ? "active" : null)" @onclick="SelectFavorites">★ Избранное</button>
@@ -119,6 +123,10 @@
         {
             <DocumentStatusResultView Results="_documentStatusResults" />
         }
+        else if (!_technicalMode && _suzDocumentStatusResults is not null)
+        {
+            <SuzDocumentStatusResultView Results="_suzDocumentStatusResults" />
+        }
         else if (!_technicalMode && _selected?.Id == TrueApiDocumentStatusHandler.OperationId && _result.Success)
         {
             <div class="notice error" role="alert">Не удалось прочитать ответ True API. Проверьте технический результат.</div>
@@ -177,6 +185,7 @@
     private CodeInfoResults? _codeResults;
     private NationalCatalogProductResult? _nationalCatalogResult;
     private DocumentStatusResults? _documentStatusResults;
+    private SuzDocumentStatusResults? _suzDocumentStatusResults;
     private bool _technicalMode;
     private bool _running;
     private bool _favoritesView;
@@ -186,7 +195,7 @@
     private bool IsProduction => IntegrationOptions.Value.Mode == CrptIntegrationMode.Production;
     private string ModeHeadline => IsProduction ? "Промышленный контур." : "Локальная симуляция.";
     private string ModeDescription => IsProduction
-        ? "True API и Национальный каталог работают с промышленным контуром. СУЗ работает в mock-режиме."
+        ? "True API, Национальный каталог и статус документа СУЗ работают с промышленным контуром. Статус заказа СУЗ (Mock) остаётся локальной демонстрацией."
         : "Все интеграции работают в mock-режиме. Сетевые запросы в Честный Знак не выполняются.";
     private IEnumerable<ApiOperationDescriptor> VisibleOperations => _favoritesView
         ? _operations.Where(x => _favoriteIds.Contains(x.Id))
@@ -200,9 +209,34 @@
         Workbench.ProfileId ??= profiles.FirstOrDefault()?.Id;
         await LoadFavoritesAsync();
         Workbench.ProfileChanged += OnProfileChanged;
-        var query = QueryHelpers.ParseQuery(Navigation.ToAbsoluteUri(Navigation.Uri).Query);
-        if (query.TryGetValue("code", out var selectedCode) && !string.IsNullOrWhiteSpace(selectedCode.ToString()))
-            await RequestRelatedCodeAsync(selectedCode.ToString());
+    }
+
+    private bool _unknownOperation;
+    private string? _lastQuery;
+    [SupplyParameterFromQuery(Name = "operation")] public string? RequestedOperation { get; set; }
+    [SupplyParameterFromQuery(Name = "code")] public string? RequestedCode { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var query = Navigation.ToAbsoluteUri(Navigation.Uri).Query;
+        if (query == _lastQuery) return;
+        _lastQuery = query;
+        var destination = OperationNavigation.ResolveConsole(query, _operations);
+        if (destination.Code is not null)
+            await RequestRelatedCodeAsync(destination.Code);
+        else if (destination.Operation is { } operation)
+        {
+            _favoritesView = false;
+            _system = operation.System;
+            SelectOperation(operation);
+        }
+        else if (destination.UnknownOperation)
+        {
+            SelectOperation(null);
+            _unknownOperation = true;
+        }
+        else if (_unknownOperation)
+            SelectSystem(_system);
     }
 
     private void SelectSystem(ApiSystem system)
@@ -220,11 +254,13 @@
 
     private void SelectOperation(ApiOperationDescriptor? operation)
     {
+        _unknownOperation = false;
         _selected = operation;
         _result = null;
         _codeResults = null;
         _nationalCatalogResult = null;
         _documentStatusResults = null;
+        _suzDocumentStatusResults = null;
         _friendlyResult = [];
         _validationError = null;
         _fieldValidation = new([]);
@@ -317,6 +353,8 @@
                 : null;
             _documentStatusResults = _selected.Id == TrueApiDocumentStatusHandler.OperationId && _result.Success
                 ? DocumentStatusResults.Parse(_result.ResponseBody) : null;
+            _suzDocumentStatusResults = _selected.Id == SuzDocumentStatusHandler.OperationId && _result.Success
+                ? SuzDocumentStatusResults.Parse(_result.ResponseBody) : null;
             _friendlyResult = BuildFriendlyResult(_result.ResponseBody);
         }
         catch (Exception exception)

@@ -3,7 +3,22 @@ using System.Text.Json.Serialization;
 
 namespace CrptWorkbench.Domain;
 
-public sealed record CodeInfoItem(CisInfo? CisInfo = null, string? ErrorCode = null, string? ErrorMessage = null);
+public sealed record CodeInfoItem(CisInfo? CisInfo = null, string? ErrorCode = null, string? ErrorMessage = null)
+{
+    public CodeDocumentHistory? DocumentHistory { get; init; }
+}
+
+public sealed record CodeDocumentHistory(bool? Paid, IReadOnlyList<CodeHistoryDocument> Documents, string? Warning = null);
+
+public sealed record CodeHistoryDocument(
+    string? DocumentId,
+    DateTimeOffset? ProcessedAt,
+    string? Type,
+    string? Status,
+    string? SenderName,
+    string? SenderInn,
+    string? ReceiverName,
+    string? ReceiverInn);
 
 public sealed record CodeInfoPermitDocument
 {
