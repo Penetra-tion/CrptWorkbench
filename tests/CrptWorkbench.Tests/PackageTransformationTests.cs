@@ -38,6 +38,16 @@ public sealed class PackageTransformationTests
     }
 
     [Fact]
+    public void ParserRemovesGroupSeparatorSuffixFromBothCodes()
+    {
+        var parsed = PackageTransformationService.Parse($"{Item}\u001D91ITEM\t{Parent}\u001D91PARENT");
+        Assert.Empty(parsed.Errors);
+        var row = Assert.Single(parsed.Rows);
+        Assert.Equal(Item, row.Item);
+        Assert.Equal(Parent, row.Package);
+    }
+
+    [Fact]
     public async Task OneParentCreatesSignedDocumentAndDurableGuid()
     {
         var repository = new MemoryRepository();

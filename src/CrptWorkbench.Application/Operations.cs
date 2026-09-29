@@ -94,16 +94,22 @@ public sealed class FavoriteApiOperationService(
     IFavoriteApiOperationRepository repository,
     IApiOperationRegistry registry)
 {
+    public static readonly IReadOnlySet<string> WorkflowIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "package-aggregation", "package-transformation", "code-correction"
+    };
+
     public async Task<IReadOnlyList<string>> ListAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
         var registered = registry.List().Select(operation => operation.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        registered.UnionWith(WorkflowIds);
         var saved = await repository.ListOperationIdsAsync(profileId, cancellationToken);
         return saved.Where(registered.Contains).ToArray();
     }
 
     public Task SetAsync(Guid profileId, string operationId, bool isFavorite, CancellationToken cancellationToken = default)
     {
-        _ = registry.GetRequired(operationId);
+        if (!WorkflowIds.Contains(operationId)) _ = registry.GetRequired(operationId);
         return repository.SetAsync(profileId, operationId, isFavorite, cancellationToken);
     }
 }

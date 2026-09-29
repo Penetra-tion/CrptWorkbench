@@ -43,6 +43,7 @@
     <FileTextInput ZoneId="package-file-drop" FileId="package-file-input" Disabled="@_busy" OnFileChange="ReadFileAsync">
         <textarea id="package-text-input" rows="7" value="@_text" @oninput="TextChanged" disabled="@_busy" spellcheck="false" placeholder="Код вложения    Код упаковки"></textarea>
     </FileTextInput>
+    <TraceXSqlImport Columns="2" MaxBytes="1000000" Disabled="@_busy" OnApply="ApplyTraceXAsync" />
     <div class="actions"><button type="button" class="button ghost" @onclick="Preview" disabled="@_busy">Проверить строки</button></div>
     @if (_message is not null) { <p class="notice package-message @(_preview?.Errors.Count > 0 ? "error" : "")" role="status">@_message</p> }
 </section>
@@ -218,6 +219,15 @@
             Preview();
         }
         catch (Exception) { _message = "Не удалось прочитать TXT. Нужен файл UTF-8 размером до 1 МБ."; _preview = null; }
+    }
+    private Task ApplyTraceXAsync((string Text, bool Append) import)
+    {
+        var text = import.Append && !string.IsNullOrWhiteSpace(_text) ? _text.TrimEnd() + "\n" + import.Text : import.Text;
+        if (Encoding.UTF8.GetByteCount(text) > 1_000_000)
+            throw new InvalidDataException("Общий список слишком велик для трансформации упаковок.");
+        _text = text;
+        _preview = null; _previewExpanded = false; _message = "Строки из TraceX загружены. Проверьте их перед отправкой.";
+        return Task.CompletedTask;
     }
     private void Preview() { _preview = PackageTransformationService.Parse(_text); _previewExpanded = false; _message = _preview.Errors.Count == 0 ? "Строки проверены. Можно отправлять документы." : "Исправьте ошибки в файле или поле ввода."; }
     private async Task TogglePreviewRows()

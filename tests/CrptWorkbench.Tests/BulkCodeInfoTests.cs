@@ -37,6 +37,13 @@ public sealed class BulkCodeInfoTests
     }
 
     [Fact]
+    public void ParserRemovesGroupSeparatorAndEverythingAfterIt()
+    {
+        var code = Code(1);
+        Assert.Equal([code], TrueApiBulkCodeInfoHandler.Parse(Input([code + "\u001D91CRYPTO"])).Codes);
+    }
+
+    [Fact]
     public async Task IncompleteBatchMakesWholeOperationFail()
     {
         var client = new FakeClient((request, _) => Task.FromResult(JsonSerializer.Deserialize<string[]>(request.Body!)!.Length == 1

@@ -16,7 +16,7 @@
         <span class="eyebrow">Профили</span>
         @foreach (var item in _profiles)
         {
-            <button class="operation @(_profile?.Id == item.Id ? "active" : null)" @onclick="() => SelectProfileAsync(item)"><strong>@item.Name</strong><small>@(item.Inn ?? "ИНН не указан")</small></button>
+            <button type="button" class="profile-option @(_profile?.Id == item.Id ? "active" : null)" aria-current="@(_profile?.Id == item.Id ? "true" : null)" @onclick="() => SelectProfileAsync(item)"><strong>@item.Name</strong><small>@(item.Inn ?? "ИНН не указан")</small></button>
         }
     </aside>
 

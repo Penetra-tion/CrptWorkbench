@@ -43,6 +43,7 @@ public interface IBulkCodeJobRepository
     Task CompleteBatchAsync(Guid jobId, long number, int found, int errors, CancellationToken cancellationToken);
     Task FailBatchAsync(Guid jobId, long number, string error, CancellationToken cancellationToken);
     Task SetJobStateAsync(Guid profileId, Guid id, string state, string? error, CancellationToken cancellationToken);
+    Task<bool> StartReadyAsync(Guid profileId, Guid id, CancellationToken cancellationToken);
     Task RetryFailuresAsync(Guid profileId, Guid id, CancellationToken cancellationToken);
     Task DeleteAsync(Guid profileId, Guid id, CancellationToken cancellationToken);
 }

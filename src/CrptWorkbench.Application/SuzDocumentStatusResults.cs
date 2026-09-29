@@ -73,6 +73,17 @@ public sealed record SuzDocumentStatusResults([property: JsonRequired] IReadOnly
         _ => DocumentStatusResults.Value(value)
     };
 
+    public static string Operation(string? value) => value switch
+    {
+        "REPORT_UTILIZE_RECEIVED" => "Получение отчёта о нанесении КМ",
+        "REPORT_UTILIZE_VALIDATION" => "Отправка на проверку метаданных отчёта в МДЛП",
+        "REPORT_UTILIZE_VALIDATION_RESULT" => "Результат проверки метаданных отчёта в МДЛП",
+        "REPORT_UTILIZE_EMISSION_SEND" => "Отправка отчёта в РЭ/РЭМ",
+        "RNMS_GIS_ROUTED" => "Отправка отчёта на обработку",
+        "RNMS_GIS_PROCESSED" => "Результат обработки отчёта",
+        _ => DocumentStatusResults.Value(value)
+    };
+
     public static string Json(JsonElement? value) => value is null ? "{}" : JsonSerializer.Serialize(value.Value, JsonOptions);
 
     public static IReadOnlyList<string> ErrorTexts(SuzReceipt item)

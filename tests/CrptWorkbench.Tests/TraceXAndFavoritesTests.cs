@@ -15,6 +15,34 @@ namespace CrptWorkbench.Tests;
 public sealed class TraceXAndFavoritesTests
 {
     [Fact]
+    public async Task WorkflowFavoritesShareProfileStorageWithExistingApiFavorites()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var database = await TestDatabase.CreateAsync(cancellationToken);
+        var profiles = new ProfileRepository(database.Factory);
+        var first = new CrptProfile { Name = "First" };
+        var second = new CrptProfile { Name = "Second" };
+        await profiles.UpsertAsync(first, cancellationToken);
+        await profiles.UpsertAsync(second, cancellationToken);
+        var repository = new FavoriteApiOperationRepository(database.Factory);
+        var service = new FavoriteApiOperationService(repository, CreateRegistry());
+
+        await service.SetAsync(first.Id, TrueApiCodeInfoHandler.OperationId, true, cancellationToken);
+        foreach (var id in FavoriteApiOperationService.WorkflowIds)
+            await service.SetAsync(first.Id, id, true, cancellationToken);
+
+        var reopened = new FavoriteApiOperationService(repository, CreateRegistry());
+        var saved = await reopened.ListAsync(first.Id, cancellationToken);
+        Assert.Contains(TrueApiCodeInfoHandler.OperationId, saved);
+        foreach (var id in FavoriteApiOperationService.WorkflowIds) Assert.Contains(id, saved);
+        Assert.Empty(await reopened.ListAsync(second.Id, cancellationToken));
+
+        await reopened.SetAsync(first.Id, "package-aggregation", false, cancellationToken);
+        Assert.DoesNotContain("package-aggregation", await reopened.ListAsync(first.Id, cancellationToken));
+        Assert.Contains(TrueApiCodeInfoHandler.OperationId, await reopened.ListAsync(first.Id, cancellationToken));
+    }
+
+    [Fact]
     public async Task FavoritesAreIdempotentCrossSystemAndScopedPerProfile()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

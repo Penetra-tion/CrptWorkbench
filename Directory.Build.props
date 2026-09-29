@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <!-- Single source of truth for assembly metadata and the UI version label. -->
-    <CrptWorkbenchVersion>1.15.7</CrptWorkbenchVersion>
+    <CrptWorkbenchVersion>1.16.2</CrptWorkbenchVersion>
     <Version>$(CrptWorkbenchVersion)</Version>
     <AssemblyVersion>$(CrptWorkbenchVersion).0</AssemblyVersion>
     <FileVersion>$(CrptWorkbenchVersion).0</FileVersion>

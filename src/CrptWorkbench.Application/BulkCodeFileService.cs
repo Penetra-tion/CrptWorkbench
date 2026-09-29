@@ -31,6 +31,28 @@ public sealed class BulkCodeFileService(
         }
     }
 
+    public async Task<BulkCodeJob> PrepareAsync(Guid profileId, long length, Stream source, CancellationToken cancellationToken)
+    {
+        if (length <= 0) throw new ArgumentException("Запрос не вернул кодов.");
+        if (await profiles.GetAsync(profileId, cancellationToken) is null) throw new InvalidOperationException("Профиль не найден.");
+        var job = new BulkCodeJob
+        {
+            ProfileId = profileId, Mode = options.Mode, FileName = "Из базы TraceX",
+            FileBytes = length, State = "Ready"
+        };
+        try
+        {
+            await files.SaveSourceAsync(job.Id, source, cancellationToken);
+            job.FileBytes = files.SourceLength(job.Id);
+            await jobs.AddAsync(job, cancellationToken);
+            return job;
+        }
+        catch { files.Delete(job.Id); throw; }
+    }
+
+    public Task<bool> StartReadyAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default) =>
+        jobs.StartReadyAsync(profileId, id, cancellationToken);
+
     public Task<IReadOnlyList<BulkCodeJob>> ListAsync(Guid profileId, CancellationToken cancellationToken = default) =>
         jobs.ListAsync(profileId, cancellationToken);
 

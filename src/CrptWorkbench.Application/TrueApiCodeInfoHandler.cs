@@ -23,7 +23,7 @@ public sealed class TrueApiCodeInfoHandler(ITrueApiClient client) : IApiOperatio
         var errors = new List<string>();
         for (var i = 0; i < lines.Length; i++)
         {
-            var code = lines[i];
+            var code = MarkingCodeInput.TrimAfterGroupSeparator(lines[i]);
             if (string.IsNullOrWhiteSpace(code)) continue;
             codes.Add(code);
             if (code.Any(char.IsControl))

@@ -1,60 +1,120 @@
 @page "/operations"
+@implements IDisposable
 @inject IApiOperationRegistry Registry
+@inject FavoriteApiOperationService Favorites
+@inject WorkbenchContext Workbench
 
 <PageTitle>Операции — CRPT Workbench</PageTitle>
-
-<div class="page-heading">
-    <div><span class="eyebrow">Рабочее пространство</span><h1>Операции</h1></div>
-</div>
+<div class="page-heading"><div><span class="eyebrow">Рабочее пространство</span><h1>Операции</h1></div></div>
 <p class="muted operations-intro">Выберите задачу: получите сведения, подготовьте упаковки или измените данные о кодах.</p>
+@if (_error is not null) { <div class="notice error" role="alert">@_error</div> }
 
-<section class="operation-group" aria-labelledby="lookup-heading">
-    <h2 id="lookup-heading">Получение сведений</h2>
-    <div class="operation-catalog">
-        @foreach (var operation in Registry.List())
-        {
-            <a class="operation-card" href="@OperationNavigation.ConsoleUrl(operation.Id)">
-                <span class="operation-card-system">@SystemName(operation.System)</span>
-                <h3>@operation.Name</h3>
-                <p>@operation.Description</p>
-            </a>
-        }
-    </div>
+<section class="operation-group" aria-labelledby="favorites-heading">
+    <h2 id="favorites-heading">Избранное</h2>
+    @if (!Catalog.Any(x => _favoriteIds.Contains(x.Id)))
+    {
+        <p class="muted">Добавьте операцию в избранное с помощью звезды на карточке.</p>
+    }
+    else
+    {
+        <div class="operation-catalog">
+            @foreach (var item in Catalog.Where(x => _favoriteIds.Contains(x.Id))) { @Card(item) }
+        </div>
+    }
 </section>
 
-<section class="operation-group" aria-labelledby="packages-heading">
-    <h2 id="packages-heading">Упаковки</h2>
-    <div class="operation-catalog">
-        <a class="operation-card" href="/package-aggregation">
-            <span class="operation-card-system">True API</span>
-            <h3>Формирование упаковок</h3>
-            <p>Объединение готовых кодов в упаковки и наборы с отслеживанием документов.</p>
-        </a>
-        <a class="operation-card" href="/package-transformation">
-            <span class="operation-card-system">True API</span>
-            <h3>Трансформация упаковок</h3>
-            <p>Добавление или изъятие кодов из упаковок с отслеживанием документов.</p>
-        </a>
-    </div>
-</section>
-
-<section class="operation-group" aria-labelledby="correction-heading">
-    <h2 id="correction-heading">Корректировка</h2>
-    <div class="operation-catalog">
-        <a class="operation-card" href="/code-correction">
-            <span class="operation-card-system">True API</span>
-            <h3>Корректировка сведений о кодах</h3>
-            <p>Изменение сведений с проверкой кодов и отслеживанием отправленного документа.</p>
-        </a>
-    </div>
-</section>
-
+<div class="tabs system-tabs" role="tablist" aria-label="Система API">
+    @foreach (var system in SystemOrder)
+    {
+        <button type="button" role="tab" aria-selected="@(_system == system)" class="@(_system == system ? "active" : null)" @onclick="() => _system = system">@SystemName(system)</button>
+    }
+</div>
+@foreach (var category in CategoryOrder)
+{
+    var items = Catalog.Where(x => x.System == _system && x.Category == category).ToArray();
+    if (items.Length == 0) continue;
+    <section class="operation-group" aria-label="@CategoryName(category)">
+        <h2>@CategoryName(category)</h2>
+        <div class="operation-catalog">
+            @foreach (var item in items) { @Card(item) }
+        </div>
+    </section>
+}
 <aside class="operation-upcoming" aria-label="Планируемые возможности">
     <span class="environment">Скоро</span>
     <div><strong>Получение полного дерева агрегации</strong><p class="muted">Обход связей упаковок и кодов с объединением результатов.</p></div>
 </aside>
 
 @code {
+    private sealed record CatalogItem(string Id, ApiSystem System, int Category, string Name, string Description, string Url);
+    private static readonly ApiSystem[] SystemOrder = [ApiSystem.TrueApi, ApiSystem.Suz, ApiSystem.NationalCatalog];
+    private static readonly int[] CategoryOrder = [0, 1, 2];
+    private IReadOnlyList<CatalogItem> Catalog = [];
+    private readonly HashSet<string> _favoriteIds = new(StringComparer.OrdinalIgnoreCase);
+    private ApiSystem _system = ApiSystem.TrueApi;
+    private int _profileVersion;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Catalog = Registry.List().Select(x => new CatalogItem(x.Id, x.System, 0, x.Name, x.Description, OperationNavigation.ConsoleUrl(x.Id)))
+            .Concat([
+                new("package-aggregation", ApiSystem.TrueApi, 1, "Формирование упаковок", "Объединение готовых кодов в упаковки и наборы с отслеживанием документов.", "/package-aggregation"),
+                new("package-transformation", ApiSystem.TrueApi, 1, "Трансформация упаковок", "Добавление или изъятие кодов из упаковок с отслеживанием документов.", "/package-transformation"),
+                new("code-correction", ApiSystem.TrueApi, 2, "Корректировка сведений о кодах", "Изменение сведений с проверкой кодов и отслеживанием отправленного документа.", "/code-correction")
+            ]).ToArray();
+        Workbench.ProfileChanged += OnProfileChanged;
+        await LoadFavoritesAsync();
+    }
+
+    private RenderFragment Card(CatalogItem item) => @<div class="operation-card-shell">
+        <a class="operation-card" href="@item.Url">
+            <span class="operation-card-system">@SystemName(item.System)</span>
+            <h3>@item.Name</h3><p>@item.Description</p>
+        </a>
+        <button type="button" class="favorite-toggle catalog-favorite @(_favoriteIds.Contains(item.Id) ? "active" : null)"
+                disabled="@(Workbench.ProfileId is null)"
+                aria-label="@((_favoriteIds.Contains(item.Id) ? "Удалить" : "Добавить") + " «" + item.Name + "» " + (_favoriteIds.Contains(item.Id) ? "из избранного" : "в избранное"))"
+                @onclick="() => ToggleFavoriteAsync(item.Id)">@(_favoriteIds.Contains(item.Id) ? "★" : "☆")</button>
+    </div>;
+
+    private async Task ToggleFavoriteAsync(string id)
+    {
+        if (Workbench.ProfileId is not { } profileId) return;
+        var isFavorite = !_favoriteIds.Contains(id);
+        _error = null;
+        try
+        {
+            await Favorites.SetAsync(profileId, id, isFavorite);
+            if (Workbench.ProfileId != profileId) return;
+            if (isFavorite) _favoriteIds.Add(id);
+            else _favoriteIds.Remove(id);
+        }
+        catch { _error = "Не удалось сохранить избранное. Попробуйте ещё раз."; }
+    }
+
+    private async Task LoadFavoritesAsync()
+    {
+        var version = ++_profileVersion;
+        var profileId = Workbench.ProfileId;
+        IReadOnlyList<string> saved = [];
+        try { if (profileId is { } id) saved = await Favorites.ListAsync(id); }
+        catch { if (version == _profileVersion) _error = "Не удалось загрузить избранное."; return; }
+        if (version != _profileVersion || Workbench.ProfileId != profileId) return;
+        _favoriteIds.Clear();
+        _favoriteIds.UnionWith(saved);
+        _error = null;
+    }
+
+    private void OnProfileChanged(object? sender, Guid? profileId) => _ = InvokeAsync(async () =>
+    {
+        _favoriteIds.Clear();
+        await LoadFavoritesAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose() => Workbench.ProfileChanged -= OnProfileChanged;
+    private static string CategoryName(int category) => category switch { 1 => "Упаковки", 2 => "Корректировка", _ => "Получение сведений" };
     private static string SystemName(ApiSystem system) => system switch
     {
         ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог",

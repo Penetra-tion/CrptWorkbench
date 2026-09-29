@@ -72,6 +72,9 @@ try
     builder.Services.AddSingleton<ITraceXConnectionStringValidator, TraceXConnectionStringValidator>();
     builder.Services.AddSingleton(new TraceXConnectionTesterOptions(TimeSpan.FromSeconds(10)));
     builder.Services.AddSingleton<ITraceXConnectionTester, TraceXConnectionTester>();
+    builder.Services.AddSingleton<ITraceXQueryReader, TraceXQueryReader>();
+    builder.Services.AddSingleton<ITraceXImportStore>(new TraceXImportStore(dataDirectory));
+    builder.Services.AddScoped<TraceXImportService>();
 
     builder.Services.AddCrptClients(integrationOptions);
     builder.Services.AddScoped<IApiOperationHandler, TrueApiCodeInfoHandler>();

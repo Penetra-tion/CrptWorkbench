@@ -1,0 +1,159 @@
+@implements IAsyncDisposable
+@using CrptWorkbench.Application
+@inject TraceXImportService Imports
+@inject ProfileService Profiles
+@inject BulkCodeFileService BulkFiles
+@inject WorkbenchContext Workbench
+
+<div class="tracex-sql-import">
+    @if (_configured)
+    {
+        <button type="button" class="button ghost" disabled="@(Disabled || _loading)" @onclick="Open">Из базы TraceX</button>
+    }
+    else
+    {
+        <a class="button ghost" href="/settings">Настроить базу TraceX</a>
+    }
+    @if (_open)
+    {
+        <div class="panel tracex-sql-panel">
+            <label for="@_inputId">SQL-запрос чтения</label>
+            <textarea id="@_inputId" rows="5" @bind="_query" disabled="@_loading" spellcheck="false" placeholder="SELECT code FROM ..."></textarea>
+            <p class="muted">@(Columns == 2 ? "Первый столбец — код вложения, второй — код упаковки." : "Первый столбец — код маркировки.") Используйте учётную запись базы с правами только на чтение.</p>
+            <div class="actions">
+                <button type="button" class="button ghost" @onclick="LoadAsync" disabled="@_loading">@(_loading ? "Загружается…" : "Загрузить")</button>
+                <button type="button" class="button ghost" @onclick="Close" disabled="@_loading">Закрыть</button>
+            </div>
+            @if (_error is not null) { <p class="error-text" role="alert">@_error</p> }
+            @if (_result is not null)
+            {
+                <p role="status">Загружено строк: @_result.Rows.</p>
+                <pre class="tracex-sql-preview">@string.Join('\n', _result.Preview)</pre>
+                @if (_result.Bytes <= MaxBytes)
+                {
+                    <div class="actions">
+                        <button type="button" class="button primary" @onclick="() => ApplyAsync(false)" disabled="@_loading">Заменить</button>
+                        <button type="button" class="button ghost" @onclick="() => ApplyAsync(true)" disabled="@_loading">Добавить</button>
+                    </div>
+                }
+                else if (!Bulk) { <p class="error-text">Результат слишком велик для этой формы.</p> }
+                @if (Bulk) { <button type="button" class="button ghost" @onclick="PrepareAsync" disabled="@_loading">Подготовить фоновое задание</button> }
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int Columns { get; set; } = 1;
+    [Parameter] public long MaxBytes { get; set; } = 1_000_000;
+    [Parameter] public bool Bulk { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback<(string Text, bool Append)> OnApply { get; set; }
+    [Parameter] public EventCallback OnBulkPrepared { get; set; }
+    private readonly string _inputId = $"tracex-sql-{Guid.NewGuid():N}";
+    private bool _configured, _open, _loading;
+    private string _query = "";
+    private string? _error;
+    private TraceXImportResult? _result;
+    private Guid? _profileId;
+    private readonly CancellationTokenSource _lifetime = new();
+    private CancellationTokenSource? _operationCancellation;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Workbench.ProfileChanged += ProfileChanged;
+        await RefreshConnectionAsync();
+    }
+
+    private async Task RefreshConnectionAsync()
+    {
+        _profileId = Workbench.ProfileId;
+        var id = _profileId;
+        _configured = id is not null && (await Profiles.GetTraceXConnectionStateAsync(id.Value, _lifetime.Token)).Configured;
+    }
+
+    private void ProfileChanged(object? sender, Guid? id) => _ = InvokeAsync(async () =>
+    {
+        _operationCancellation?.Cancel();
+        _open = false; _query = ""; _error = null;
+        Imports.Delete(_result); _result = null;
+        await RefreshConnectionAsync();
+        StateHasChanged();
+    });
+
+    private void Open() { _open = true; _error = null; }
+    private void Close() { _open = false; _query = ""; _error = null; Imports.Delete(_result); _result = null; }
+    private async Task LoadAsync()
+    {
+        if (_profileId is not { } id) return;
+        _operationCancellation?.Dispose();
+        _operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var token = _operationCancellation.Token;
+        _loading = true; _error = null;
+        Imports.Delete(_result); _result = null;
+        try
+        {
+            var result = await Imports.ImportAsync(id, _query, Columns, token);
+            if (Workbench.ProfileId == id) _result = result; else Imports.Delete(result);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException or InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        catch (Exception) { _error = "Не удалось загрузить данные из базы TraceX."; }
+        finally { _loading = false; _operationCancellation?.Dispose(); _operationCancellation = null; }
+    }
+
+    private async Task ApplyAsync(bool append)
+    {
+        if (_result is not { } result || Workbench.ProfileId != result.ProfileId) return;
+        _loading = true; _error = null;
+        try
+        {
+            var text = await Imports.ReadTextAsync(result, result.ProfileId, MaxBytes, _lifetime.Token);
+            if (Workbench.ProfileId != result.ProfileId) return;
+            await OnApply.InvokeAsync((text, append));
+            Close();
+        }
+        catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        catch (Exception) { _error = "Не удалось подставить данные в форму."; }
+        finally { _loading = false; }
+    }
+
+    private async Task PrepareAsync()
+    {
+        if (_result is not { } result || Workbench.ProfileId != result.ProfileId) return;
+        _loading = true; _error = null;
+        try
+        {
+            await using var source = Imports.OpenRead(result, result.ProfileId);
+            var job = await BulkFiles.PrepareAsync(result.ProfileId, result.Bytes, source, _lifetime.Token);
+            if (Workbench.ProfileId != result.ProfileId)
+            {
+                await BulkFiles.DeleteAsync(result.ProfileId, job.Id, _lifetime.Token);
+                return;
+            }
+            Close();
+            await OnBulkPrepared.InvokeAsync();
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        {
+            _error = "Не удалось подготовить задание. Проверьте свободное место на диске.";
+        }
+        catch (Exception) { _error = "Не удалось подготовить задание."; }
+        finally { _loading = false; }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        Workbench.ProfileChanged -= ProfileChanged;
+        _operationCancellation?.Cancel();
+        _lifetime.Cancel(); _lifetime.Dispose();
+        Imports.Delete(_result);
+        return ValueTask.CompletedTask;
+    }
+}

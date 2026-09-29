@@ -48,7 +48,7 @@
                     @foreach (var operation in receipt.Operations)
                     {
                         <article class="suz-event">
-                            <h3>@operation.OperationType</h3>
+                            <h3>@SuzDocumentStatusResults.Operation(operation.OperationType)</h3>
                             <div class="result-grid">
                                 <article class="result-field"><span>Идентификатор этапа</span><strong>@operation.OperationId</strong></article>
                                 <article class="result-field"><span>Дата этапа</span><strong>@SuzDocumentStatusResults.Date(operation.OperationDate)</strong></article>

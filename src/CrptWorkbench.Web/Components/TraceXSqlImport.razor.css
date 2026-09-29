@@ -1,0 +1,4 @@
+.tracex-sql-import { margin-block: .75rem; }
+.tracex-sql-panel { margin-top: .75rem; }
+.tracex-sql-panel textarea { display: block; width: 100%; margin-block: .5rem; }
+.tracex-sql-preview { max-height: 16rem; overflow: auto; white-space: pre; font-size: .82rem; }

@@ -49,6 +49,7 @@
     <FileTextInput ZoneId="package-file-drop" FileId="package-file-input" Disabled="@_busy" OnFileChange="ReadFileAsync">
         <textarea id="package-text-input" rows="7" disabled="@_busy" spellcheck="false" placeholder="Код вложения    Код упаковки"></textarea>
     </FileTextInput>
+    <TraceXSqlImport Columns="2" MaxBytes="9223372036854775807" Disabled="@_busy" OnApply="ApplyTraceXAsync" />
     <div class="actions"><button type="button" class="button ghost" @onclick="PreviewAsync" disabled="@_busy">Проверить строки</button></div>
     @if (_message is not null) { <p class="notice package-message @(_preview?.Errors.Count > 0 ? "error" : "")" role="status">@_message</p> }
 </section>
@@ -285,6 +286,21 @@
         catch (OperationCanceledException) when (_disposed) { }
         catch (Exception) { if (version == _contextVersion) { _message = "Не удалось прочитать TXT. Нужен текстовый файл в UTF-8."; _preview = null; } }
         finally { _busy = false; }
+    }
+    private async Task ApplyTraceXAsync((string Text, bool Append) import)
+    {
+        if (_dropModule is null) return;
+        var existing = "";
+        if (import.Append)
+        {
+            await using var reference = await _dropModule.InvokeAsync<IJSStreamReference>("readText", "package-text-input");
+            await using var stream = await reference.OpenReadStreamAsync(long.MaxValue, _refreshCancellation.Token);
+            using var reader = new StreamReader(stream, new UTF8Encoding(false, true));
+            existing = await reader.ReadToEndAsync(_refreshCancellation.Token);
+        }
+        _text = string.IsNullOrWhiteSpace(existing) ? import.Text : existing.TrimEnd() + "\n" + import.Text;
+        await _dropModule.InvokeVoidAsync("setText", "package-text-input", _text);
+        _preview = null; _previewProfileId = null; _message = "Загружено строк из TraceX.";
     }
     private void Preview() { _packagePage = 0; _itemPages.Clear(); _preview = PackageAggregationService.Parse(_text, _createSet); _previewProfileId = Workbench.ProfileId; _message = _preview.Errors.Count == 0 ? "Строки проверены. Можно отправлять документы." : "Исправьте ошибки в файле или поле ввода."; }
     private async Task SubmitAsync()

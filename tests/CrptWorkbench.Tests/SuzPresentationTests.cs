@@ -16,6 +16,19 @@ namespace CrptWorkbench.Tests;
 public sealed class SuzPresentationTests
 {
     [Theory]
+    [InlineData("REPORT_UTILIZE_RECEIVED", "Получение отчёта о нанесении КМ")]
+    [InlineData("REPORT_UTILIZE_VALIDATION", "Отправка на проверку метаданных отчёта в МДЛП")]
+    [InlineData("REPORT_UTILIZE_VALIDATION_RESULT", "Результат проверки метаданных отчёта в МДЛП")]
+    [InlineData("REPORT_UTILIZE_EMISSION_SEND", "Отправка отчёта в РЭ/РЭМ")]
+    [InlineData("RNMS_GIS_ROUTED", "Отправка отчёта на обработку")]
+    [InlineData("RNMS_GIS_PROCESSED", "Результат обработки отчёта")]
+    [InlineData("FUTURE_OPERATION", "FUTURE_OPERATION")]
+    public void OperationNamesAreLocalizedWithUnknownFallback(string operation, string expected)
+    {
+        Assert.Equal(expected, SuzDocumentStatusResults.Operation(operation));
+    }
+
+    [Theory]
     [InlineData("SUCCESS", "tone-success")]
     [InlineData("FAILED", "tone-error")]
     [InlineData("IN_PROGRESS", "tone-warning")]
@@ -40,6 +53,10 @@ public sealed class SuzPresentationTests
         Assert.Contains("10000000-0000-0000-0000-000000000001", html);
         Assert.Contains("10000000-0000-0000-0000-000000000002", html);
         Assert.Contains("Этапы обработки (2)", html);
+        Assert.Contains("Получение отчёта о нанесении КМ", html);
+        Assert.Contains("Результат обработки отчёта", html);
+        Assert.DoesNotContain("REPORT_UTILIZE_RECEIVED", html);
+        Assert.DoesNotContain("RNMS_GIS_PROCESSED", html);
         Assert.Contains("<details", html);
         Assert.Contains("Квитанции не найдены", await Render<SuzDocumentStatusResultView>(new() { ["Results"] = new SuzDocumentStatusResults([]) }));
     }
@@ -48,12 +65,24 @@ public sealed class SuzPresentationTests
     public async Task CatalogShowsSuzDocumentStatusWithoutLegacyOrder()
     {
         IApiOperationHandler[] handlers = [new SuzDocumentStatusHandler(new MockSuzClient())];
-        await using var services = new ServiceCollection().AddLogging().AddSingleton<IApiOperationRegistry>(new ApiOperationRegistry(handlers)).BuildServiceProvider();
+        await using var services = new ServiceCollection().AddLogging()
+            .AddSingleton<IApiOperationRegistry>(new ApiOperationRegistry(handlers))
+            .AddSingleton(new WorkbenchContext())
+            .AddSingleton<IFavoriteApiOperationRepository>(new EmptyFavoriteRepository())
+            .AddSingleton<FavoriteApiOperationService>()
+            .BuildServiceProvider();
         await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
         var html = await renderer.Dispatcher.InvokeAsync(async () => WebUtility.HtmlDecode((await renderer.RenderComponentAsync<Operations>()).ToHtmlString()));
-        Assert.Contains(OperationNavigation.ConsoleUrl(SuzDocumentStatusHandler.OperationId), html);
+        Assert.Contains("aria-label=\"Система API\"", html);
+        Assert.Contains("СУЗ", html);
         Assert.DoesNotContain("Запрос статуса заказа", html);
-        Assert.Contains("Статус документа СУЗ", html);
+        Assert.DoesNotContain("Статус документа СУЗ", html);
+    }
+
+    private sealed class EmptyFavoriteRepository : IFavoriteApiOperationRepository
+    {
+        public Task<IReadOnlyList<string>> ListOperationIdsAsync(Guid profileId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task SetAsync(Guid profileId, string operationId, bool isFavorite, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     [Fact]

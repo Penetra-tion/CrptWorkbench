@@ -19,6 +19,21 @@ public sealed class BulkCodeFileJobTests
     private static string Code(int number) => $"010460000000000021{number:D12}";
 
     [Fact]
+    public async Task PreparedSqlJobDoesNotRunUntilExplicitStart()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var bytes = Encoding.UTF8.GetBytes(Code(1) + "\n");
+        await using var source = new MemoryStream(bytes);
+        var job = await fixture.Service.PrepareAsync(DemoProfile, bytes.Length, source, TestContext.Current.CancellationToken);
+        Assert.Equal("Ready", job.State);
+        Assert.Null(await fixture.Jobs.NextRunnableAsync(CrptIntegrationMode.Mock, TestContext.Current.CancellationToken));
+        Assert.False(await fixture.Service.StartReadyAsync(OtherProfile, job.Id, TestContext.Current.CancellationToken));
+        Assert.True(await fixture.Service.StartReadyAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken));
+        Assert.False(await fixture.Service.StartReadyAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken));
+        Assert.NotNull(await fixture.Jobs.NextRunnableAsync(CrptIntegrationMode.Mock, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task LargeFileUploadStaysOutOfTheFormAndIsProfileScoped()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -129,6 +144,23 @@ public sealed class BulkCodeFileJobTests
         Assert.Equal(5, client.Requests.Count);
         Assert.InRange(client.PeakConcurrent, 1, 4);
         Assert.All(client.Requests, request => Assert.InRange(JsonSerializer.Deserialize<string[]>(request.Body!)!.Length, 1, 1000));
+    }
+
+    [Fact]
+    public async Task FileCodesAreTrimmedAfterGroupSeparatorBeforeRequest()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var code = Code(1);
+        var payload = Encoding.UTF8.GetBytes(code + "\u001D91CRYPTO");
+        await using var source = new MemoryStream(payload);
+        var job = await fixture.Service.UploadAsync(DemoProfile, "gs.txt", payload.Length, source, TestContext.Current.CancellationToken);
+        var client = new FakeClient();
+
+        await fixture.Processor(client).ProcessNextAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("Completed", (await fixture.Service.GetAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken))!.State);
+        var request = Assert.Single(client.Requests);
+        Assert.Equal([code], Assert.IsType<string[]>(JsonSerializer.Deserialize<string[]>(request.Body!)));
     }
 
     private sealed class Fixture : IAsyncDisposable

@@ -36,11 +36,20 @@ public sealed class PackageAggregationTests
     [Theory]
     [InlineData("010460000000000021DEMO#00000001")]
     [InlineData("010460000000000021ДЕМО00000001")]
-    [InlineData("010460000000000021DEMO\u001d000001")]
     public void ParserRejectsDisallowedCharacters(string code)
     {
         Assert.NotEmpty(PackageAggregationService.Parse(code + "\t" + Parent).Errors);
         Assert.NotEmpty(PackageAggregationService.Parse(Item + "\t" + code).Errors);
+    }
+
+    [Fact]
+    public void ParserRemovesGroupSeparatorSuffixFromBothCodes()
+    {
+        var preview = PackageAggregationService.Parse($"{Item}\u001D91ITEM\t{Parent}\u001D91PARENT");
+        Assert.Empty(preview.Errors);
+        var row = Assert.Single(preview.Rows);
+        Assert.Equal(Item, row.Item);
+        Assert.Equal(Parent, row.Package);
     }
 
     [Fact]

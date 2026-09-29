@@ -62,6 +62,12 @@ public sealed class CodeInfoTests
         Assert.Equal(1000, TrueApiCodeInfoHandler.Parse(Input(string.Join('\n', Enumerable.Repeat(First, 1000)))).Codes.Count);
     }
 
+    [Fact]
+    public void ParserRemovesGroupSeparatorAndEverythingAfterIt()
+    {
+        Assert.Equal([First, Second], TrueApiCodeInfoHandler.Parse(Input($"{First}\u001D91CRYPTO\n{Second}")).Codes);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("\n \r\n")]

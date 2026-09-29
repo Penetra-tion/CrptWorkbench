@@ -86,6 +86,7 @@
     <FileTextInput ZoneId="correction-file-drop" FileId="correction-file" Disabled="@_busy" OnFileChange="ReadFileAsync">
         <textarea id="correction-text" rows="7" spellcheck="false" disabled="@_busy" placeholder="Один код на строку"></textarea>
     </FileTextInput>
+    <TraceXSqlImport Columns="1" MaxBytes="9000000" Disabled="@_busy" OnApply="ApplyTraceXAsync" />
     <div class="actions"><button class="button ghost" disabled="@_busy" @onclick="ReadTextAsync">Загрузить список</button></div>
     <label class="checkbox-field"><input type="checkbox" @bind="_checkBeforeSending" @bind:after="Invalidate" disabled="@_busy" /> Проверять коды перед отправкой</label>
     @if (!_checkBeforeSending) { <p class="notice">Без предварительной проверки статуса и товарной группы кодов.</p> }

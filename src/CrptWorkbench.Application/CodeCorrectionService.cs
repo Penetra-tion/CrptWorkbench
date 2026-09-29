@@ -22,8 +22,9 @@ public sealed class CodeCorrectionService(
         var codes = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var duplicates = 0;
-        foreach (var code in text.TrimStart('\uFEFF').Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+        foreach (var line in text.TrimStart('\uFEFF').Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
         {
+            var code = MarkingCodeInput.TrimAfterGroupSeparator(line);
             if (string.IsNullOrWhiteSpace(code)) continue;
             if (seen.Add(code)) codes.Add(code); else duplicates++;
         }

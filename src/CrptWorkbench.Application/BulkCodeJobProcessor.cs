@@ -110,7 +110,7 @@ public sealed class BulkCodeJobProcessor(
             lines++;
             if (line.Length == 0) continue;
             if (job.NextOffset == 0 && lines == 1 && line[0] == '\uFEFF') line = line[1..];
-            ValidateCode(line, job.LinesRead + lines);
+            ValidateCode(MarkingCodeInput.TrimAfterGroupSeparator(line), job.LinesRead + lines);
             count++;
         }
         var batch = new BulkCodeBatch
@@ -196,7 +196,7 @@ public sealed class BulkCodeJobProcessor(
         while (reader.Position < batch.EndOffset && await reader.ReadLineAsync(cancellationToken) is { } line)
         {
             if (batch.StartOffset == 0 && codes.Count == 0 && line.Length > 0 && line[0] == '\uFEFF') line = line[1..];
-            if (line.Length > 0) codes.Add(line);
+            if (line.Length > 0) codes.Add(MarkingCodeInput.TrimAfterGroupSeparator(line));
         }
         return codes.ToArray();
     }

@@ -20,7 +20,7 @@ public sealed class TrueApiBulkCodeInfoHandler(ITrueApiClient client) : IApiOper
         var errors = new List<string>();
         for (var i = 0; i < lines.Length; i++)
         {
-            var code = lines[i];
+            var code = MarkingCodeInput.TrimAfterGroupSeparator(lines[i]);
             if (string.IsNullOrWhiteSpace(code)) continue;
             codes.Add(code);
             if (code.Any(char.IsControl)) errors.Add($"Строка {i + 1}: КИ не должен содержать управляющие символы.");

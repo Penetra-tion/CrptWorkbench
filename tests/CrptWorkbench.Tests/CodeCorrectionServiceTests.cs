@@ -16,6 +16,14 @@ public sealed class CodeCorrectionServiceTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static CodeCorrectionRequest Request(params string[] codes) => new("milk", "productionDate", new("2026-09-01"), codes.Length == 0 ? [Good] : codes);
 
+    [Fact]
+    public void ParserRemovesGroupSeparatorSuffixBeforeDeduplication()
+    {
+        var parsed = CodeCorrectionService.ParseCodes($"{Good}\u001D91FIRST\n{Good}\u001D91SECOND\n{Retired}");
+        Assert.Equal([Good, Retired], parsed.Codes);
+        Assert.Equal(1, parsed.DuplicateCount);
+    }
+
     [Theory]
     [InlineData("vsd")]
     [InlineData("productionDate")]

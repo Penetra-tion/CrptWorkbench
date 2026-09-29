@@ -46,8 +46,8 @@ public sealed class PackageTransformationService(PackageDocumentService document
                 errors.Add($"Строка {i + 1}: нужны два кода, разделённые пробелом или табуляцией.");
                 continue;
             }
-            var item = cells[0].Trim();
-            var package = cells[1].Trim();
+            var item = MarkingCodeInput.TrimAfterGroupSeparator(cells[0].Trim());
+            var package = MarkingCodeInput.TrimAfterGroupSeparator(cells[1].Trim());
             if (!CodeCharacters.IsMatch(item) || !CodeCharacters.IsMatch(package))
             {
                 errors.Add($"Строка {i + 1}: код должен содержать 18–74 допустимых символа без управляющих знаков.");

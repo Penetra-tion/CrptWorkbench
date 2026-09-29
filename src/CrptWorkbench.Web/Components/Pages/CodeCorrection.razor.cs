@@ -166,6 +166,21 @@ public partial class CodeCorrection
         if (_module is not null) await _module.InvokeVoidAsync("setText", "correction-text", text);
         Parse(text);
     });
+    private async Task ApplyTraceXAsync((string Text, bool Append) import)
+    {
+        if (_module is null) return;
+        var existing = "";
+        if (import.Append)
+        {
+            await using var reference = await _module.InvokeAsync<IJSStreamReference>("readText", "correction-text");
+            await using var stream = await reference.OpenReadStreamAsync(long.MaxValue, _lifetime.Token);
+            using var reader = new StreamReader(stream, new UTF8Encoding(false, true), false);
+            existing = await reader.ReadToEndAsync(_lifetime.Token);
+        }
+        var text = string.IsNullOrWhiteSpace(existing) ? import.Text : existing.TrimEnd() + "\n" + import.Text;
+        await _module.InvokeVoidAsync("setText", "correction-text", text);
+        Parse(text);
+    }
     private Task CheckAsync() => RunAsync("Проверяем коды…", async (version, token) =>
     {
         if (Workbench.ProfileId is not { } id) return;

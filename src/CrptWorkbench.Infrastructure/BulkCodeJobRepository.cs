@@ -97,6 +97,14 @@ public sealed class BulkCodeJobRepository(IDbContextFactory<WorkbenchDbContext> 
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<bool> StartReadyAsync(Guid profileId, Guid id, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        return await db.BulkCodeJobs.Where(x => x.ProfileId == profileId && x.Id == id && x.State == "Ready")
+            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.State, "Queued")
+                .SetProperty(x => x.UpdatedAt, DateTimeOffset.UtcNow), cancellationToken) == 1;
+    }
+
     public async Task RetryFailuresAsync(Guid profileId, Guid id, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);

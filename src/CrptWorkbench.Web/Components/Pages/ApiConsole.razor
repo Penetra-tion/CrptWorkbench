@@ -8,7 +8,6 @@
 @inject BulkCodeFileService BulkFiles
 @inject BulkCodeDownloadTickets BulkTickets
 @inject ProfileService Profiles
-@inject FavoriteApiOperationService Favorites
 @inject WorkbenchContext Workbench
 @inject IJSRuntime JavaScript
 @inject IOptions<CrptIntegrationOptions> IntegrationOptions
@@ -27,39 +26,7 @@
     <div class="notice error" role="alert">Операция не найдена. <a href="/operations">Выберите задачу в каталоге операций.</a></div>
 }
 
-<div class="tabs system-tabs" role="tablist" aria-label="Система API">
-    <button type="button" role="tab" disabled="@_running" aria-selected="@_favoritesView" class="@(_favoritesView ? "active" : null)" @onclick="SelectFavorites">★ Избранное</button>
-    @foreach (var system in SystemTabOrder)
-    {
-        <button type="button" role="tab" disabled="@_running" aria-selected="@(_system == system)" class="@(_system == system ? "active" : null)" @onclick="() => SelectSystem(system)">@SystemName(system)</button>
-    }
-</div>
-
 <div class="console-grid">
-    <aside class="operations-panel panel">
-        <span class="eyebrow">@(_favoritesView ? "Избранные операции" : "Доступные операции")</span>
-        <div class="operations">
-        @if (!VisibleOperations.Any())
-        {
-            <div class="empty compact-empty">Добавьте операции в избранное с помощью звезды.</div>
-        }
-        else
-        {
-            @foreach (var operation in VisibleOperations)
-            {
-                <div class="operation-row">
-                    <button type="button" disabled="@_running" class="operation operation-select @(_selected?.Id == operation.Id ? "active" : null)" @onclick="() => SelectOperation(operation)">
-                        <span class="operation-main"><strong>@operation.Name</strong><span class="method-badge">@operation.HttpMethod</span></span>
-                        <small>@operation.Description</small>
-                        @if (_favoritesView) { <small class="operation-system">@SystemName(operation.System)</small> }
-                    </button>
-                    <button type="button" disabled="@(_running || Workbench.ProfileId is null)" class="favorite-toggle @(IsFavorite(operation.Id) ? "active" : null)" @onclick="() => ToggleFavoriteAsync(operation)" aria-label="@(IsFavorite(operation.Id) ? $"Удалить «{operation.Name}» из избранного" : $"Добавить «{operation.Name}» в избранное")" title="@(IsFavorite(operation.Id) ? "Удалить из избранного" : "Добавить в избранное")">@(IsFavorite(operation.Id) ? "★" : "☆")</button>
-                </div>
-            }
-        }
-        </div>
-    </aside>
-
     <section class="panel editor">
         @if (_selected is not null)
         {
@@ -80,6 +47,7 @@
                             <FileTextInput @key="_selected.Id" ZoneId="code-file-drop" FileId="code-file-input" Disabled="@(_running || _bulkUploading)" Hint="@(_selected.Id == TrueApiBulkCodeInfoHandler.OperationId ? "TXT-файл запускает фоновую обработку и не помещается в поле." : null)" OnFileChange="@(_selected.Id == TrueApiBulkCodeInfoHandler.OperationId ? UploadBulkFileAsync : ReadCodesFileAsync)">
                                 <textarea id="code-text-input" rows="7" value="@GetValue(field.Name)" @oninput="args => SetValue(field.Name, args.Value?.ToString())" placeholder="@field.Placeholder" required="@field.Required" disabled="@(_running || _bulkUploading)" spellcheck="false" aria-describedby="@($"help-{field.Name}")"></textarea>
                             </FileTextInput>
+                            <TraceXSqlImport @key="TraceXImportKey" Columns="1" MaxBytes="1000000" Bulk="@(_selected.Id == TrueApiBulkCodeInfoHandler.OperationId)" Disabled="@(_running || _bulkUploading)" OnApply="ApplyTraceXCodesAsync" OnBulkPrepared="RefreshBulkJobsAsync" />
                             @if (field.HelpText is not null) { <small id="@($"help-{field.Name}")" class="muted field-help">@field.HelpText</small> }
                             @if (_fieldValidation.ErrorFor(field.Name) is { } fieldError) { <small class="error-text" role="alert">@fieldError</small> }
                         </div>
@@ -137,10 +105,11 @@
                             @if (job.Error is not null) { <p class="error-text">@job.Error</p> }
                             <div class="actions">
                                 <button type="button" class="button ghost" @onclick="() => DownloadBulkAsync(job.Id)" disabled="@(SelectedBulkStatuses.Count == 0 || job.CodesCompleted == 0)">Скачать КМ выбранных статусов</button>
+                                @if (job.State == "Ready") { <button type="button" class="button primary" @onclick="() => StartReadyBulkJobAsync(job.Id)">Запустить проверку</button> }
                                 @if (job.State is "Queued" or "Running") { <button type="button" class="button ghost" @onclick="() => CancelBulkJobAsync(job.Id)">Отменить</button> }
                                 @if (job.State == "Partial") { <button type="button" class="button ghost" @onclick="() => RetryBulkJobAsync(job.Id)">Повторить ошибки</button> }
                                 @if (job.State == "Failed" && job.Error?.StartsWith("Недостаточно места", StringComparison.Ordinal) == true) { <button type="button" class="button ghost" @onclick="() => ResumeBulkJobAsync(job.Id)">Продолжить</button> }
-                                @if (job.State is "Completed" or "Partial" or "Canceled" or "Failed") { <button type="button" class="button ghost" @onclick="() => DeleteBulkJobAsync(job.Id)">Удалить</button> }
+                                @if (job.State is "Ready" or "Completed" or "Partial" or "Canceled" or "Failed") { <button type="button" class="button ghost" @onclick="() => DeleteBulkJobAsync(job.Id)">Удалить</button> }
                             </div>
                         </div>
                     }
@@ -290,8 +259,8 @@
 
     private void ApplyMockExample(MockExample example) => SetValue(example.Field, example.Value);
     private void ApplyLargeBoxExample() => SetValue("codes", "000000000000000100");
+    private string? TraceXImportKey => _selected is null ? null : $"tracex-{_selected.Id}";
 
-    private static readonly ApiSystem[] SystemTabOrder = [ApiSystem.TrueApi, ApiSystem.Suz, ApiSystem.NationalCatalog];
     private static readonly (string Code, string Label)[] BulkStatuses =
     [
         ("EMITTED", "Эмитирован"), ("APPLIED", "Нанесён"), ("INTRODUCED", "В обороте"),
@@ -338,7 +307,6 @@
     private IReadOnlyList<ApiOperationDescriptor> _operations = [];
     private readonly Dictionary<string, string> _values = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<ResultField> _friendlyResult = [];
-    private ApiSystem _system = ApiSystem.TrueApi;
     private ApiOperationDescriptor? _selected;
     private ApiExecutionResult? _result;
     private CodeInfoResults? _codeResults;
@@ -348,8 +316,6 @@
     private bool _technicalMode;
     private bool _running;
     private CancellationTokenSource? _executionCancellation;
-    private bool _favoritesView;
-    private readonly HashSet<string> _favoriteIds = new(StringComparer.OrdinalIgnoreCase);
     private string? _validationError;
     private InputValidationResult _fieldValidation = new([]);
     private bool IsProduction => IntegrationOptions.Value.Mode == CrptIntegrationMode.Production;
@@ -357,17 +323,12 @@
     private string ModeDescription => IsProduction
         ? "True API, Национальный каталог и статус документа СУЗ работают с промышленным контуром. Статус заказа СУЗ (Mock) остаётся локальной демонстрацией."
         : "Все интеграции работают в mock-режиме. Сетевые запросы в Честный Знак не выполняются.";
-    private IEnumerable<ApiOperationDescriptor> VisibleOperations => _favoritesView
-        ? _operations.Where(x => _favoriteIds.Contains(x.Id))
-        : _operations.Where(x => x.System == _system);
-
     protected override async Task OnInitializedAsync()
     {
         _operations = Registry.List();
-        SelectSystem(_system);
+        SelectOperation(_operations.FirstOrDefault());
         var profiles = await Profiles.ListAsync();
         Workbench.ProfileId ??= profiles.FirstOrDefault()?.Id;
-        await LoadFavoritesAsync();
         await RefreshBulkJobsAsync();
         _ = PollBulkJobsAsync();
         Workbench.ProfileChanged += OnProfileChanged;
@@ -389,8 +350,6 @@
             await RequestRelatedCodeAsync(destination.Code);
         else if (destination.Operation is { } operation)
         {
-            _favoritesView = false;
-            _system = operation.System;
             SelectOperation(operation);
         }
         else if (destination.UnknownOperation)
@@ -399,20 +358,7 @@
             _unknownOperation = true;
         }
         else if (_unknownOperation)
-            SelectSystem(_system);
-    }
-
-    private void SelectSystem(ApiSystem system)
-    {
-        _favoritesView = false;
-        _system = system;
-        SelectOperation(_operations.FirstOrDefault(x => x.System == system));
-    }
-
-    private void SelectFavorites()
-    {
-        _favoritesView = true;
-        SelectOperation(VisibleOperations.FirstOrDefault());
+            SelectOperation(_operations.FirstOrDefault());
     }
 
     private void SelectOperation(ApiOperationDescriptor? operation)
@@ -444,14 +390,22 @@
         var operation = _operations.FirstOrDefault(x => x.Id == TrueApiCodeInfoHandler.OperationId);
         if (operation is null) return;
         if (_selected?.Id != operation.Id) SelectOperation(operation);
-        _favoritesView = false;
-        _system = ApiSystem.TrueApi;
         SetValue("codes", code);
         _technicalMode = false;
         await ExecuteAsync();
     }
 
     private string GetValue(string name) => _values.GetValueOrDefault(name, string.Empty);
+    private Task ApplyTraceXCodesAsync((string Text, bool Append) import)
+    {
+        var value = import.Append && !string.IsNullOrWhiteSpace(GetValue("codes"))
+            ? GetValue("codes").TrimEnd() + "\n" + import.Text.Trim()
+            : import.Text.Trim();
+        if (Encoding.UTF8.GetByteCount(value) > 1_000_000)
+            throw new InvalidDataException("Общий список слишком велик для поля. Используйте фоновое задание.");
+        SetValue("codes", value);
+        return Task.CompletedTask;
+    }
     private void SetValue(string name, string? value)
     {
         _values[name] = value ?? string.Empty;
@@ -518,6 +472,12 @@
         await BulkFiles.CancelAsync(profileId, id);
         await RefreshBulkJobsAsync();
     }
+    private async Task StartReadyBulkJobAsync(Guid id)
+    {
+        if (Workbench.ProfileId is not { } profileId) return;
+        await BulkFiles.StartReadyAsync(profileId, id);
+        await RefreshBulkJobsAsync();
+    }
 
     private async Task RetryBulkJobAsync(Guid id)
     {
@@ -550,38 +510,13 @@
 
     private static string BulkStateLabel(string state) => state switch
     {
-        "Queued" => "в очереди", "Running" => "выполняется", "CancelRequested" => "отменяется",
+        "Ready" => "подготовлено", "Queued" => "в очереди", "Running" => "выполняется", "CancelRequested" => "отменяется",
         "Canceled" => "отменено", "Completed" => "готово", "Partial" => "готово с ошибками",
         "Failed" => "ошибка", _ => state
     };
-    private bool IsFavorite(string operationId) => _favoriteIds.Contains(operationId);
-
-    private async Task ToggleFavoriteAsync(ApiOperationDescriptor operation)
-    {
-        if (Workbench.ProfileId is null) return;
-        var makeFavorite = !_favoriteIds.Contains(operation.Id);
-        await Favorites.SetAsync(Workbench.ProfileId.Value, operation.Id, makeFavorite);
-        Logger.LogInformation("Favorite changed {OperationId} {ProfileId} {IsFavorite}", operation.Id, Workbench.ProfileId.Value, makeFavorite);
-        if (makeFavorite) _favoriteIds.Add(operation.Id);
-        else _favoriteIds.Remove(operation.Id);
-
-        if (_favoritesView && !makeFavorite && _selected?.Id == operation.Id)
-            SelectOperation(VisibleOperations.FirstOrDefault());
-    }
-
-    private async Task LoadFavoritesAsync()
-    {
-        _favoriteIds.Clear();
-        if (Workbench.ProfileId is null) return;
-        foreach (var operationId in await Favorites.ListAsync(Workbench.ProfileId.Value))
-            _favoriteIds.Add(operationId);
-    }
-
     private void OnProfileChanged(object? sender, Guid? profileId) => _ = InvokeAsync(async () =>
     {
-        await LoadFavoritesAsync();
         await RefreshBulkJobsAsync();
-        if (_favoritesView) SelectOperation(VisibleOperations.FirstOrDefault());
         StateHasChanged();
     });
 
