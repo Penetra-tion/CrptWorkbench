@@ -213,6 +213,10 @@
         {
             <MercuryVsdResultView Result="_mercuryVsd" />
         }
+        else if (!_technicalMode && _permitDocument is not null)
+        {
+            <PermitDocumentResultView Result="_permitDocument" />
+        }
         else if (!_technicalMode && _selected?.Id == TrueApiDocumentStatusHandler.OperationId && _result.Success)
         {
             <div class="notice error" role="alert">Не удалось прочитать ответ True API. Проверьте технический результат.</div>
@@ -270,6 +274,7 @@
         [NationalCatalogProductHandler.OperationId] = new("04600000000000", "gtin", "04600000000000"),
         [SuzDocumentStatusHandler.OperationId] = new("00000000-0000-0000-0000-000000000001", "documentId", "00000000-0000-0000-0000-000000000001"),
         [MercuryVsdInfoHandler.OperationId] = new(MercuryVsdInfoHandler.ExampleUid, "uid", MercuryVsdInfoHandler.ExampleUid),
+        [PermitDocumentLookupHandler.OperationId] = new(PermitDocumentLookupHandler.ExampleNumber, "number", PermitDocumentLookupHandler.ExampleNumber),
         ["suz.order-status"] = new("demo-order-001", "value", "demo-order-001")
     };
 
@@ -334,6 +339,7 @@
     private DocumentStatusResults? _documentStatusResults;
     private SuzDocumentStatusResults? _suzDocumentStatusResults;
     private MercuryVsdInfoResult? _mercuryVsd;
+    private PermitDocumentResult? _permitDocument;
     private bool _technicalMode;
     private bool _running;
     private bool _documentLookupMissing;
@@ -387,6 +393,7 @@
             _documentStatusResults = null;
             _suzDocumentStatusResults = null;
             _mercuryVsd = null;
+            _permitDocument = null;
             _documentLookupNotice = null;
             _returnUrl = null;
             return;
@@ -443,6 +450,7 @@
         _documentStatusResults = null;
         _suzDocumentStatusResults = null;
         _mercuryVsd = null;
+        _permitDocument = null;
         _friendlyResult = [];
         _validationError = null;
         _fieldValidation = new([]);
@@ -730,6 +738,8 @@
                 ? SuzDocumentStatusResults.Parse(_result.ResponseBody) : null;
             _mercuryVsd = _selected.Id == MercuryVsdInfoHandler.OperationId && _result.Success
                 ? MercuryVsdInfoResult.Parse(_result.ResponseBody) : null;
+            _permitDocument = _selected.Id == PermitDocumentLookupHandler.OperationId
+                ? PermitDocumentResult.Parse(_result.ResponseBody) : null;
             _friendlyResult = BuildFriendlyResult(_result.ResponseBody);
         }
         catch (OperationCanceledException) when (_executionCancellation.IsCancellationRequested)
@@ -790,7 +800,7 @@
 
     private Task CopyRequestAsync() => JavaScript.InvokeVoidAsync("crptWorkbench.copyText", $"{_result?.HttpMethod} {_result?.RequestUrl}\n{_result?.RequestHeaders}\n\n{_result?.RequestBody}").AsTask();
     private Task CopyResponseAsync() => JavaScript.InvokeVoidAsync("crptWorkbench.copyText", $"{_result?.ResponseHeaders}\n\n{_result?.ResponseBody}").AsTask();
-    private static string SystemName(ApiSystem system) => system switch { ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", ApiSystem.Mercury => "Меркурий", _ => "СУЗ" };
+    private static string SystemName(ApiSystem system) => system switch { ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", ApiSystem.Mercury => "Меркурий", ApiSystem.PermitDocuments => "Разрешительные документы", _ => "СУЗ" };
 
     public ValueTask DisposeAsync()
     {

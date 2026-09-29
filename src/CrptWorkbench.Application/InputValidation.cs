@@ -59,6 +59,9 @@ public static class InputValidation
                 case MercuryVsdInfoHandler.OperationId:
                     MercuryVsdInfoHandler.Parse(values);
                     break;
+                case PermitDocumentLookupHandler.OperationId:
+                    PermitDocumentNumbers.Parse(values.GetValueOrDefault("number"));
+                    break;
                 case NationalCatalogProductHandler.OperationId:
                     var gtin = values.GetValueOrDefault("gtin")?.Trim() ?? "";
                     if (gtin.Length is not (8 or 12 or 13 or 14) || gtin.Any(c => !char.IsAsciiDigit(c)))
@@ -75,7 +78,8 @@ public static class InputValidation
         catch (ArgumentException exception)
         {
             var field = operationId is TrueApiCodeInfoHandler.OperationId or TrueApiBulkCodeInfoHandler.OperationId ? "codes" :
-                operationId == MercuryVsdInfoHandler.OperationId ? "uid" : "documentId";
+                operationId == MercuryVsdInfoHandler.OperationId ? "uid" :
+                operationId == PermitDocumentLookupHandler.OperationId ? "number" : "documentId";
             if (operationId == TrueApiDocumentStatusHandler.OperationId && exception.Message.Contains("товарной группы", StringComparison.Ordinal)) field = "productGroup";
             issues.Add(new(field, exception.Message));
         }

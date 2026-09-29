@@ -54,6 +54,7 @@
                 else if (_result?.Documents is not null) { <DocumentStatusResultView Results="_result.Documents" /> }
                 else if (_result?.SuzDocuments is not null) { <SuzDocumentStatusResultView Results="_result.SuzDocuments" /> }
                 else if (_result?.MercuryVsd is not null) { <MercuryVsdResultView Result="_result.MercuryVsd" /> }
+                else if (_result?.PermitDocument is not null) { <PermitDocumentResultView Result="_result.PermitDocument" /> }
                 else if (_result?.Fields.Count > 0)
                 {
                     <div class="result-grid">
@@ -181,7 +182,7 @@
     };
     private static string SystemName(ApiSystem system) => system switch
     {
-        ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", ApiSystem.Suz => "СУЗ", ApiSystem.Mercury => "Меркурий", _ => "Другая система"
+        ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", ApiSystem.Suz => "СУЗ", ApiSystem.Mercury => "Меркурий", ApiSystem.PermitDocuments => "Разрешительные документы", _ => "Другая система"
     };
 
     private static IReadOnlyList<ApiHttpExchange> ReadExchanges(ApiRequestLog item)

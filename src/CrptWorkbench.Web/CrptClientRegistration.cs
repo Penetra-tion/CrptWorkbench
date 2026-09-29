@@ -13,6 +13,7 @@ public static class CrptClientRegistration
             services.AddSingleton<INationalCatalogClient, RealNationalCatalogClient>();
             services.AddSingleton<ISuzClient, RealSuzClient>();
             services.AddSingleton<IMercuryClient, RealMercuryClient>();
+            services.AddSingleton<IPermitDocumentClient, RealPermitDocumentClient>();
         }
         else
         {
@@ -20,6 +21,7 @@ public static class CrptClientRegistration
             services.AddSingleton<INationalCatalogClient, MockNationalCatalogClient>();
             services.AddSingleton<ISuzClient, MockSuzClient>();
             services.AddSingleton<IMercuryClient, MockMercuryClient>();
+            services.AddSingleton<IPermitDocumentClient, MockPermitDocumentClient>();
         }
         return services;
     }

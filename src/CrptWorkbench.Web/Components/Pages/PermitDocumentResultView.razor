@@ -1,0 +1,52 @@
+@using CrptWorkbench.Domain
+
+<div class="friendly-result-head">
+    <div class="result-icon @(Result.State == "unavailable" ? "error-icon" : null)" aria-hidden="true">@(Result.State == "unavailable" ? "!" : "✓")</div>
+    <div>
+        <span class="eyebrow">Разрешительные документы</span>
+        <h2>@(Result.State switch { "found" => "Документ найден", "multiple" => "Найдено несколько записей", "not_found" => "Документ не найден", _ => "Не удалось проверить" })</h2>
+        <p class="muted">Проверено @Result.CheckedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</p>
+    </div>
+</div>
+@if (!string.IsNullOrWhiteSpace(Result.Notice))
+{
+    <div class="notice error" role="status">@Result.Notice</div>
+}
+@if (Result.Items.Count == 0)
+{
+    <p class="muted">Номер: @Result.Number</p>
+}
+@foreach (var item in Result.Items)
+{
+    <section class="permit-result-card" aria-label="@item.Type">
+        <h3>@item.Type</h3>
+        <div class="result-grid">
+            @Field("Номер", item.Number)
+            @Field("Страна выдачи", item.Country)
+            @Field("Статус реестра", item.Status)
+            @Field("Дата регистрации", item.RegisteredAt)
+            @Field("Окончание действия", item.ExpiresAt)
+            @Field("Продукция", item.Product)
+            @Field("Изготовитель", item.Manufacturer)
+            @Field("Заявитель / получатель", item.Applicant)
+            @Field("Технические регламенты / нормативный документ", item.TechnicalRegulations)
+        </div>
+        <p class="muted">Источник: <a href="@item.SourceUrl" target="_blank" rel="noopener noreferrer">@item.SourceName</a></p>
+    </section>
+}
+@if (Result.State is "unavailable" or "not_found")
+{
+    <a href="@Result.ManualUrl" target="_blank" rel="noopener noreferrer">Проверить в реестре вручную ↗</a>
+}
+
+@code {
+    [Parameter, EditorRequired] public PermitDocumentResult Result { get; set; } = default!;
+    private RenderFragment Field(string label, string? value) => builder =>
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+        builder.OpenElement(0, "article"); builder.AddAttribute(1, "class", "result-field");
+        builder.OpenElement(2, "span"); builder.AddContent(3, label); builder.CloseElement();
+        builder.OpenElement(4, "strong"); builder.AddContent(5, value); builder.CloseElement();
+        builder.CloseElement();
+    };
+}

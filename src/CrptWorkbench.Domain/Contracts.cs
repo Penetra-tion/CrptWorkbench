@@ -129,3 +129,8 @@ public interface IMercuryClient
 {
     Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default);
 }
+
+public interface IPermitDocumentClient
+{
+    Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default);
+}

@@ -83,6 +83,7 @@ try
     builder.Services.AddScoped<IApiOperationHandler, NationalCatalogProductHandler>();
     builder.Services.AddScoped<IApiOperationHandler, SuzDocumentStatusHandler>();
     builder.Services.AddScoped<IApiOperationHandler, MercuryVsdInfoHandler>();
+    builder.Services.AddScoped<IApiOperationHandler, PermitDocumentLookupHandler>();
     builder.Services.AddScoped<IApiOperationRegistry, ApiOperationRegistry>();
     builder.Services.AddScoped<ExecuteApiOperationService>();
     builder.Services.AddScoped<CodeHistoryDocumentLookup>();
@@ -113,6 +114,15 @@ try
     builder.Services.AddTransient<SuzAuthenticationNetworkGuardHandler>();
     builder.Services.AddTransient<SuzSafeLoggingHandler>();
     builder.Services.AddTransient<MercuryNetworkGuardHandler>();
+    builder.Services.AddTransient<PermitDocumentNetworkGuardHandler>();
+    builder.Services.AddHttpClient("PermitSgrPublic", client => client.Timeout = TimeSpan.FromSeconds(15))
+        .RemoveAllLoggers()
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+        .AddHttpMessageHandler<PermitDocumentNetworkGuardHandler>();
+    builder.Services.AddHttpClient("PermitEaeuPublic", client => client.Timeout = TimeSpan.FromSeconds(15))
+        .RemoveAllLoggers()
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+        .AddHttpMessageHandler<PermitDocumentNetworkGuardHandler>();
     builder.Services.AddHttpClient("MercuryPublic")
         .RemoveAllLoggers()
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })

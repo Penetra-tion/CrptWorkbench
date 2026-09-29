@@ -5,7 +5,8 @@ public enum ApiSystem
     TrueApi,
     NationalCatalog,
     Suz,
-    Mercury
+    Mercury,
+    PermitDocuments
 }
 
 public enum CrptEnvironment

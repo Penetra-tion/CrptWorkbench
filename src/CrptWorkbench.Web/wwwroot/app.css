@@ -324,6 +324,11 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 .result-icon.error-icon { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); color: var(--danger); }
 .validation-result { white-space: pre-line; }
 .result-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.permit-result-card { min-width: 0; padding: 16px 0; }
+.permit-result-card + .permit-result-card { border-top: 1px solid var(--line); }
+.permit-result-card h3 { margin: 0 0 12px; overflow-wrap: break-word; }
+.permit-result-card .result-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
+.permit-result-card > p { margin: 12px 0 0; overflow-wrap: break-word; }
 .result-field { display: grid; align-content: center; gap: 8px; border: 1px solid var(--line); background: var(--input); border-radius: 11px; padding: 15px; }
 .result-field span { color: var(--muted); font-size: .73rem; text-transform: uppercase; letter-spacing: .06em; }
 .result-field strong { color: var(--heading); overflow-wrap: anywhere; }

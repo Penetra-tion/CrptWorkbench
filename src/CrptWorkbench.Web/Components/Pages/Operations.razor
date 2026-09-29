@@ -47,7 +47,7 @@
 
 @code {
     private sealed record CatalogItem(string Id, ApiSystem System, int Category, string Name, string Description, string Url);
-    private static readonly ApiSystem[] SystemOrder = [ApiSystem.TrueApi, ApiSystem.Suz, ApiSystem.NationalCatalog, ApiSystem.Mercury];
+    private static readonly ApiSystem[] SystemOrder = [ApiSystem.TrueApi, ApiSystem.Suz, ApiSystem.NationalCatalog, ApiSystem.Mercury, ApiSystem.PermitDocuments];
     private static readonly int[] CategoryOrder = [0, 1, 2];
     private IReadOnlyList<CatalogItem> Catalog = [];
     private readonly HashSet<string> _favoriteIds = new(StringComparer.OrdinalIgnoreCase);
@@ -118,6 +118,6 @@
     private static string SystemName(ApiSystem system) => system switch
     {
         ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог",
-        ApiSystem.Suz => "СУЗ", ApiSystem.Mercury => "Меркурий", _ => system.ToString()
+        ApiSystem.Suz => "СУЗ", ApiSystem.Mercury => "Меркурий", ApiSystem.PermitDocuments => "Разрешительные документы", _ => system.ToString()
     };
 }
