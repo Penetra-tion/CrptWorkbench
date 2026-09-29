@@ -120,14 +120,15 @@ public sealed class MockTrueApiClient : ITrueApiClient
             var id = Uri.UnescapeDataString(request.Url[4..request.Url.IndexOf("/info?", StringComparison.Ordinal)]);
             var documents = id switch
             {
-                "demo-code-emission" => new object[] { new { number = id, receivedAt = "2026-09-17T14:33:00Z", type = "EMISSION", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
-                "demo-code-payment" => new object[] { new { number = id, receivedAt = "2026-09-24T03:54:00Z", type = "PAYMENT", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
-                "demo-code-application" => new object[] { new { number = id, receivedAt = "2026-09-24T03:54:00Z", type = "APPLIED", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
-                "demo-code-aggregation" => new object[] { new { number = id, receivedAt = "2026-09-24T04:07:00Z", type = "AGGREGATION_DOCUMENT", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
-                "demo-code-introduction" => new object[] { new { number = id, receivedAt = "2026-09-24T04:28:00Z", type = "LP_INTRODUCE_GOODS", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
+                "11111111-0000-0000-0000-000000000001" or "demo-code-emission" => new object[] { new { number = id, receivedAt = "2026-09-17T14:33:00Z", type = "EMISSION", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
+                "11111111-0000-0000-0000-000000000002" or "demo-code-payment" => new object[] { new { number = id, receivedAt = "2026-09-24T03:54:00Z", type = "PAYMENT", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
+                "11111111-0000-0000-0000-000000000003" or "demo-code-application" => new object[] { new { number = id, receivedAt = "2026-09-24T03:54:00Z", type = "APPLIED", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
+                "11111111-0000-0000-0000-000000000004" or "demo-code-aggregation" => new object[] { new { number = id, receivedAt = "2026-09-24T04:07:00Z", type = "AGGREGATION_DOCUMENT", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
+                "11111111-0000-0000-0000-000000000005" or "demo-code-introduction" => new object[] { new { number = id, receivedAt = "2026-09-24T04:28:00Z", type = "LP_INTRODUCE_GOODS", senderName = "Демонстрационный производитель", senderInn = "0000000000", status = "ACCEPTED" } },
                 "demo-success" => new object[] { new { number = id, receivedAt = "2026-09-23T09:15:00Z", type = "LP_INTRODUCE_GOODS", productGroup = new[] { "lp", "shoes" }, status = "ACCEPTED", errors = Array.Empty<string>(), commonErrors = Array.Empty<object>() } },
                 "demo-pending" => new object[] { new { number = id, receivedAt = "2026-09-23T09:16:00Z", type = "LP_INTRODUCE_GOODS", productGroup = new[] { "lp" }, status = "IN_PROGRESS", errors = Array.Empty<string>(), commonErrors = Array.Empty<object>() } },
                 "demo-error" => new object[] { new { number = id, receivedAt = "2026-09-23T09:17:00Z", type = "LP_INTRODUCE_GOODS", productGroup = new[] { "lp" }, status = "PARSE_ERROR", errors = new[] { "Некорректный формат документа" }, commonErrors = new object[] { new { errorMessage = "Некорректный формат документа" }, new { errorMessage = "Отсутствует обязательное поле" } } } },
+                "22222222-0000-0000-0000-000000000001" or "00000000-0000-0000-0000-000000000006" => [],
                 _ when Guid.TryParse(id, out _) => new[] { CreatePackageDocumentStatus(id) },
                 _ => []
             };
@@ -138,8 +139,8 @@ public sealed class MockTrueApiClient : ITrueApiClient
         {
             var code = Uri.UnescapeDataString(request.Url[(request.Url.IndexOf("?cis=", StringComparison.Ordinal) + 5)..]);
             var ids = code == UnitOne
-                ? new[] { "demo-code-emission", "demo-code-payment", "demo-code-application", "demo-code-aggregation", "demo-code-introduction" }
-                : code == UnitTwo ? new[] { "demo-code-emission", "demo-code-application" } : [];
+                ? new[] { "11111111-0000-0000-0000-000000000001", "11111111-0000-0000-0000-000000000002", "11111111-0000-0000-0000-000000000003", "11111111-0000-0000-0000-000000000004", "11111111-0000-0000-0000-000000000005" }
+                : code == UnitTwo ? new[] { "11111111-0000-0000-0000-000000000001", "11111111-0000-0000-0000-000000000003" } : [];
             var events = ids.Select((id, index) => new { cis = code, docId = id, timestamp = new DateTimeOffset(2026, 9, 24, 3, 54, 0, TimeSpan.Zero).AddMinutes(index) }).ToArray();
             return MockExchangeFactory.ExecuteAsync(ApiSystem.TrueApi, request, cancellationToken,
                 JsonSerializer.Serialize(events, JsonOptions), ids.Length == 0 ? 404 : 200);

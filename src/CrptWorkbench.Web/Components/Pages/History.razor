@@ -48,11 +48,12 @@
                     {
                         <p class="muted">Показаны первые 50 из @_result.Codes.Items.Count результатов. Полный ответ доступен в техническом виде.</p>
                     }
-                    <CodeInfoResultView Results="@(_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId ? new CodeInfoResults(_result.Codes.Items.Take(50).ToArray()) : _result.Codes)" OnCodeSelected="RequestRelatedCode" ShowOwnCodeAction="@(_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId)" />
+                    <CodeInfoResultView Results="@(_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId ? new CodeInfoResults(_result.Codes.Items.Take(50).ToArray()) : _result.Codes)" OnCodeSelected="RequestRelatedCode" OnGtinSelected="RequestGtin" OnDocumentSelected="RequestDocument" ShowOwnCodeAction="@(_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId)" />
                 }
                 else if (_result?.Product is not null) { <NationalCatalogProductResultView Result="_result.Product" /> }
                 else if (_result?.Documents is not null) { <DocumentStatusResultView Results="_result.Documents" /> }
                 else if (_result?.SuzDocuments is not null) { <SuzDocumentStatusResultView Results="_result.SuzDocuments" /> }
+                else if (_result?.MercuryVsd is not null) { <MercuryVsdResultView Result="_result.MercuryVsd" /> }
                 else if (_result?.Fields.Count > 0)
                 {
                     <div class="result-grid">
@@ -152,6 +153,11 @@
 
     private void OpenHistory(Guid id) => Navigation.NavigateTo($"/history?id={id}");
     private void RequestRelatedCode(string code) => Navigation.NavigateTo($"/console?code={Uri.EscapeDataString(code)}", forceLoad: true);
+    private void RequestDocument(CodeHistoryDocumentSelection selection) => Navigation.NavigateTo(
+        QueryHelpers.AddQueryString(OperationNavigation.DocumentUrl(selection), "returnTo", SelectedReturnUrl()));
+    private void RequestGtin(string gtin) => Navigation.NavigateTo(QueryHelpers.AddQueryString("/console",
+        new Dictionary<string, string?> { ["gtin"] = gtin, ["returnTo"] = SelectedReturnUrl() }));
+    private string SelectedReturnUrl() => Navigation.ToAbsoluteUri($"/history?id={_selected!.Id}").ToString();
     private void OnRowKeyDown(KeyboardEventArgs args, Guid id)
     {
         if (args.Key == "Enter") OpenHistory(id);
@@ -175,7 +181,7 @@
     };
     private static string SystemName(ApiSystem system) => system switch
     {
-        ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", ApiSystem.Suz => "СУЗ", _ => "Другая система"
+        ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", ApiSystem.Suz => "СУЗ", ApiSystem.Mercury => "Меркурий", _ => "Другая система"
     };
 
     private static IReadOnlyList<ApiHttpExchange> ReadExchanges(ApiRequestLog item)

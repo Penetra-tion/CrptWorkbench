@@ -13,6 +13,38 @@ namespace CrptWorkbench.Tests;
 
 public sealed class ResultPresentationTests
 {
+    [Fact]
+    public async Task GtinIsClickableOnlyWhenCodeProvidesAValue()
+    {
+        var present = await Render<CodeInfoResultView>(new CodeInfoResults(
+            [new(new CisInfo { RequestedCis = "code-1", Gtin = "04600000000000" })]));
+        Assert.Contains("title=\"Запросить товар в Национальном каталоге\"", present);
+        Assert.Contains("04600000000000</button>", present);
+
+        var absent = await Render<CodeInfoResultView>(new CodeInfoResults(
+            [new(new CisInfo { RequestedCis = "code-2" })]));
+        Assert.DoesNotContain("Запросить товар в Национальном каталоге", absent);
+    }
+
+    [Fact]
+    public async Task VsdAppearsOnlyWhenPresentAndLinksOnlyForMercuryUid()
+    {
+        const string uid = "8332-6981-984B-455F-881A-A48E-7C9A-3586";
+        var linked = CodeInfoResults.Parse($"[{{\"cisInfo\":{{\"requestedCis\":\"code-1\",\"vsd\":\"{uid}\"}}}}]")!;
+        var linkedHtml = await Render<CodeInfoResultView>(linked);
+        Assert.Contains("<dt>ВСД</dt>", linkedHtml);
+        Assert.Contains("title=\"Запросить ВСД в Меркурии\"", linkedHtml);
+        Assert.Contains($">{uid}</button>", linkedHtml);
+
+        var number = CodeInfoResults.Parse("[{\"cisInfo\":{\"requestedCis\":\"code-2\",\"vsd\":\"12345\"}}]")!;
+        var numberHtml = await Render<CodeInfoResultView>(number);
+        Assert.Contains("<dt>ВСД</dt>", numberHtml);
+        Assert.DoesNotContain("Запросить ВСД в Меркурии", numberHtml);
+
+        var absent = await Render<CodeInfoResultView>(new CodeInfoResults([new(new CisInfo { RequestedCis = "code-3" })]));
+        Assert.DoesNotContain("<dt>ВСД</dt>", absent);
+    }
+
     [Theory]
     [InlineData("RETIRED", "DEFECT", null, "Повреждение или брак")]
     [InlineData("WRITTEN_OFF", "OTHER", "Повреждение", "Повреждение")]

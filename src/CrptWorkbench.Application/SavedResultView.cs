@@ -11,7 +11,8 @@ public sealed record SavedResultView(
     DocumentStatusResults? Documents,
     IReadOnlyList<SavedResultField> Fields,
     string? Notice,
-    SuzDocumentStatusResults? SuzDocuments = null)
+    SuzDocumentStatusResults? SuzDocuments = null,
+    MercuryVsdInfoResult? MercuryVsd = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -29,6 +30,7 @@ public sealed record SavedResultView(
                 NationalCatalogProductHandler.OperationId => FromProduct(log),
                 TrueApiDocumentStatusHandler.OperationId => FromDocuments(log),
                 SuzDocumentStatusHandler.OperationId => FromSuzDocuments(log),
+                MercuryVsdInfoHandler.OperationId => FromMercury(log),
                 "suz.order-status" => FromSuz(log),
                 _ => new(null, null, null, [], "Для этой операции нет обычного представления. Откройте технический вид.")
             };
@@ -96,6 +98,13 @@ public sealed record SavedResultView(
         var result = SuzDocumentStatusResults.Parse(log.ResponseBody);
         return result is null ? new(null, null, null, [], log.Error ?? "Некорректный ответ СУЗ. Откройте технический вид.")
             : new(null, null, null, [], null, result);
+    }
+
+    private static SavedResultView FromMercury(ApiRequestLog log)
+    {
+        if (!log.Success) return new(null, null, null, [], log.Error ?? "Запрос не выполнен.");
+        var result = MercuryVsdInfoResult.Parse(log.ResponseBody);
+        return result is null ? Invalid() : new(null, null, null, [], null, null, result);
     }
 
     private static SavedResultView Invalid() => new(null, null, null, [], "Не удалось прочитать сохранённый ответ. Откройте технический вид.");

@@ -4,7 +4,8 @@ public enum ApiSystem
 {
     TrueApi,
     NationalCatalog,
-    Suz
+    Suz,
+    Mercury
 }
 
 public enum CrptEnvironment

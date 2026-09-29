@@ -152,6 +152,8 @@ public sealed class ExecuteApiOperationService(
     {
         if (operationId.Equals(SuzDocumentStatusHandler.OperationId, StringComparison.OrdinalIgnoreCase))
             InputValidation.Operation(SuzDocumentStatusHandler.OperationId, values).ThrowIfInvalid();
+        if (operationId.Equals(MercuryVsdInfoHandler.OperationId, StringComparison.OrdinalIgnoreCase))
+            InputValidation.Operation(MercuryVsdInfoHandler.OperationId, values).ThrowIfInvalid();
         var profile = await profiles.GetAsync(profileId, cancellationToken)
             ?? throw new InvalidOperationException("Select an existing profile before running an operation.");
         var handler = registry.GetRequired(operationId);
@@ -240,7 +242,13 @@ public sealed class ExecuteApiOperationService(
     private static ApiError MapHttpError(int statusCode, ApiSystem system)
     {
         if (system != ApiSystem.NationalCatalog)
-            return new ApiError($"Сервис вернул ошибку HTTP {statusCode}.", "http_error");
+            return system == ApiSystem.Mercury ? statusCode switch
+            {
+                404 => new("ВСД с указанным УИД не найден.", "not_found"),
+                502 => new("Не удалось прочитать страницу ВСД. Возможно, формат сайта изменился.", "invalid_response"),
+                503 => new("Публичная проверка Меркурия временно недоступна.", "service_unavailable"),
+                _ => new($"Публичная проверка Меркурия вернула HTTP {statusCode}.", "http_error")
+            } : new ApiError($"Сервис вернул ошибку HTTP {statusCode}.", "http_error");
         return statusCode switch
         {
             401 => new("Bearer-токен Национального каталога отсутствует или истёк. Обновите его в настройках.", "unauthorized"),

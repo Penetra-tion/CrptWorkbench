@@ -1,0 +1,26 @@
+@using CrptWorkbench.Application
+
+<div class="friendly-result-head"><div class="result-icon" aria-hidden="true">✓</div><div><span class="eyebrow">Меркурий</span><h2>Сведения о ВСД</h2></div></div>
+<div class="result-grid">
+    @Field("Статус", Result.Status)
+    @Field("УИД", Result.Uid)
+    @Field("Дата оформления", Result.IssueDate)
+    @Field("Номер производственной партии", string.Join("; ", Result.BatchNumbers))
+    @Field("GTIN", Result.Gtin)
+    @Field("Название продукции", Result.ProductName)
+    @Field("Объём", Result.Volume)
+    @Field("Годен до", Result.Expiry)
+    @Field("Упаковка", string.Join("; ", Result.Packages))
+</div>
+
+@code {
+    [Parameter, EditorRequired] public MercuryVsdInfoResult Result { get; set; } = default!;
+    private RenderFragment Field(string label, string? value) => builder =>
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+        builder.OpenElement(0, "article"); builder.AddAttribute(1, "class", "result-field");
+        builder.OpenElement(2, "span"); builder.AddContent(3, label); builder.CloseElement();
+        builder.OpenElement(4, "strong"); builder.AddContent(5, value); builder.CloseElement();
+        builder.CloseElement();
+    };
+}

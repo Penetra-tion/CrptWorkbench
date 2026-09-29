@@ -1,4 +1,5 @@
 @using System.Globalization
+@using System.Text.Json
 
 @if (ShowSummary)
 {
@@ -48,7 +49,11 @@
                     <div class="code-response-code"><span class="muted">Код из ответа</span><code>@info.Cis</code></div>
                 }
                 <dl class="code-primary-fields">
-                    <div><dt>GTIN</dt><dd>@GtinValue(info)</dd></div>
+                    <div><dt>GTIN</dt><dd>@if (!string.IsNullOrWhiteSpace(info.Gtin)) { <button type="button" class="code-history-link" disabled="@Busy" title="Запросить товар в Национальном каталоге" @onclick="() => OnGtinSelected.InvokeAsync(info.Gtin)">@info.Gtin</button> } else { @GtinValue(info) }</dd></div>
+                    @if (VsdValue(info) is { } vsd)
+                    {
+                        <div><dt>ВСД</dt><dd>@if (IsMercuryUid(vsd)) { <button type="button" class="code-history-link" disabled="@Busy" title="Запросить ВСД в Меркурии" @onclick="() => OnVsdSelected.InvokeAsync(vsd)">@vsd</button> } else { @vsd }</dd></div>
+                    }
                     <div><dt>Владелец</dt><dd>@(info.OwnerName ?? "—") @if (info.OwnerInn is not null) { <small class="muted">ИНН @info.OwnerInn</small> }</dd></div>
                     @if (info.Status is "RETIRED" or "WITHDRAWN" or "WRITTEN_OFF")
                     {
@@ -150,9 +155,22 @@
                                         @foreach (var document in documents)
                                         {
                                             <tr>
-                                                <td>@DocumentTypeLabel(document.Type) @if (!string.IsNullOrWhiteSpace(document.Status)) { <small class="muted">@DocumentStatusResults.Status(document.Status)</small> }</td>
+                                                <td>
+                                                    @if (CodeHistoryDocumentLookup.IsValidId(document.DocumentId))
+                                                    {
+                                                        <button type="button" class="code-history-link" disabled="@Busy" title="Запросить документ в API Console" @onclick="() => OnDocumentSelected.InvokeAsync(new CodeHistoryDocumentSelection(document.DocumentId!, ApiSystem.TrueApi, info?.ProductGroup))">@DocumentTypeLabel(document.Type)</button>
+                                                    }
+                                                    else { @DocumentTypeLabel(document.Type) }
+                                                    @if (!string.IsNullOrWhiteSpace(document.Status)) { <small class="muted">@DocumentStatusResults.Status(document.Status)</small> }
+                                                </td>
                                                 <td>@FormatDate(document.ProcessedAt)</td>
-                                                <td class="code-history-id">@(document.DocumentId ?? "—")</td>
+                                                <td class="code-history-id">
+                                                    @if (CodeHistoryDocumentLookup.IsValidId(document.DocumentId))
+                                                    {
+                                                        <button type="button" class="code-history-link" disabled="@Busy" title="Запросить документ в API Console" @onclick="() => OnDocumentSelected.InvokeAsync(new CodeHistoryDocumentSelection(document.DocumentId!, ApiSystem.TrueApi, info?.ProductGroup))">@document.DocumentId</button>
+                                                    }
+                                                    else { @(document.DocumentId ?? "—") }
+                                                </td>
                                                 <td>@PartyLabel(document.SenderName, document.SenderInn)</td>
                                                 <td>@PartyLabel(document.ReceiverName, document.ReceiverInn)</td>
                                             </tr>
@@ -175,6 +193,9 @@
 @code {
     [Parameter, EditorRequired] public CodeInfoResults Results { get; set; } = new([]);
     [Parameter] public EventCallback<string> OnCodeSelected { get; set; }
+    [Parameter] public EventCallback<string> OnGtinSelected { get; set; }
+    [Parameter] public EventCallback<string> OnVsdSelected { get; set; }
+    [Parameter] public EventCallback<CodeHistoryDocumentSelection> OnDocumentSelected { get; set; }
     [Parameter] public bool Busy { get; set; }
     [Parameter] public bool ShowSummary { get; set; } = true;
     [Parameter] public bool ShowOwnCodeAction { get; set; }
@@ -224,6 +245,23 @@
     private static string GtinValue(CisInfo? info) => !string.IsNullOrWhiteSpace(info?.Gtin)
         ? info.Gtin
         : OmitsProductDetails(info) ? "Не возвращается для этого типа" : "—";
+
+    private static string? VsdValue(CisInfo info) =>
+        info.AdditionalFields?.TryGetValue("vsd", out var value) == true && value.ValueKind == JsonValueKind.String &&
+        !string.IsNullOrWhiteSpace(value.GetString()) ? value.GetString() : null;
+
+    private static bool IsMercuryUid(string vsd)
+    {
+        try
+        {
+            MercuryVsdInfoHandler.Parse(new Dictionary<string, string> { ["uid"] = vsd });
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
 
     private static string ApplicationDateValue(CisInfo info) => info.ApplicationDate.HasValue
         ? FormatDate(info.ApplicationDate)

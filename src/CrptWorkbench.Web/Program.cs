@@ -82,8 +82,10 @@ try
     builder.Services.AddScoped<IApiOperationHandler, TrueApiDocumentStatusHandler>();
     builder.Services.AddScoped<IApiOperationHandler, NationalCatalogProductHandler>();
     builder.Services.AddScoped<IApiOperationHandler, SuzDocumentStatusHandler>();
+    builder.Services.AddScoped<IApiOperationHandler, MercuryVsdInfoHandler>();
     builder.Services.AddScoped<IApiOperationRegistry, ApiOperationRegistry>();
     builder.Services.AddScoped<ExecuteApiOperationService>();
+    builder.Services.AddScoped<CodeHistoryDocumentLookup>();
     builder.Services.AddScoped<FavoriteApiOperationService>();
     builder.Services.AddScoped<FavoriteProductGroupService>();
     builder.Services.AddScoped<ProfileService>();
@@ -110,6 +112,11 @@ try
     builder.Services.AddTransient<ProductionSuzNetworkGuardHandler>();
     builder.Services.AddTransient<SuzAuthenticationNetworkGuardHandler>();
     builder.Services.AddTransient<SuzSafeLoggingHandler>();
+    builder.Services.AddTransient<MercuryNetworkGuardHandler>();
+    builder.Services.AddHttpClient("MercuryPublic")
+        .RemoveAllLoggers()
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+        .AddHttpMessageHandler<MercuryNetworkGuardHandler>();
     builder.Services.AddHttpClient(HttpClientNames.SuzProduction)
         .RemoveAllLoggers()
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })

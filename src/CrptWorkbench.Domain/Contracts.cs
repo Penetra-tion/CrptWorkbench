@@ -124,3 +124,8 @@ public interface ISuzClient
 {
     Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default);
 }
+
+public interface IMercuryClient
+{
+    Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default);
+}

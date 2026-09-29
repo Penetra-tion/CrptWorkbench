@@ -3,8 +3,11 @@
 @implements IAsyncDisposable
 @using System.Text.Json
 @using System.Text
+@using Microsoft.AspNetCore.WebUtilities
+@using CrptWorkbench.Domain
 @inject IApiOperationRegistry Registry
 @inject ExecuteApiOperationService Executor
+@inject CodeHistoryDocumentLookup DocumentLookup
 @inject BulkCodeFileService BulkFiles
 @inject BulkCodeDownloadTickets BulkTickets
 @inject ProfileService Profiles
@@ -16,6 +19,10 @@
 <PageTitle>Получение сведений — CRPT Workbench</PageTitle>
 
 <a class="operations-back" href="/operations"><span aria-hidden="true">←</span><span>Все операции</span></a>
+@if (_returnUrl is not null)
+{
+    <button type="button" class="button ghost" disabled="@_running" @onclick="ReturnToCodes">← Назад к запросу кодов</button>
+}
 <div class="page-heading console-heading">
     <div><span class="eyebrow">Операции</span><h1>Получение сведений</h1></div>
 </div>
@@ -24,6 +31,10 @@
 @if (_unknownOperation)
 {
     <div class="notice error" role="alert">Операция не найдена. <a href="/operations">Выберите задачу в каталоге операций.</a></div>
+}
+@if (_documentLookupNotice is not null)
+{
+    <div class="notice @(_documentLookupMissing ? "error" : "")" role="status">@_documentLookupNotice</div>
 }
 
 <div class="console-grid">
@@ -184,7 +195,7 @@
         }
         else if (!_technicalMode && _selected?.Id != TrueApiBulkCodeInfoHandler.OperationId && _codeResults is not null)
         {
-            <CodeInfoResultView Results="_codeResults" Busy="_running" OnCodeSelected="RequestRelatedCodeAsync" />
+            <CodeInfoResultView Results="_codeResults" Busy="_running" OnCodeSelected="RequestRelatedCodeAsync" OnGtinSelected="RequestGtin" OnVsdSelected="RequestVsd" OnDocumentSelected="RequestHistoryDocument" />
         }
         else if (!_technicalMode && _nationalCatalogResult is not null)
         {
@@ -197,6 +208,10 @@
         else if (!_technicalMode && _suzDocumentStatusResults is not null)
         {
             <SuzDocumentStatusResultView Results="_suzDocumentStatusResults" />
+        }
+        else if (!_technicalMode && _mercuryVsd is not null)
+        {
+            <MercuryVsdResultView Result="_mercuryVsd" />
         }
         else if (!_technicalMode && _selected?.Id == TrueApiDocumentStatusHandler.OperationId && _result.Success)
         {
@@ -254,6 +269,7 @@
         [TrueApiDocumentStatusHandler.OperationId] = new("demo-success", "documentId", "demo-success"),
         [NationalCatalogProductHandler.OperationId] = new("04600000000000", "gtin", "04600000000000"),
         [SuzDocumentStatusHandler.OperationId] = new("00000000-0000-0000-0000-000000000001", "documentId", "00000000-0000-0000-0000-000000000001"),
+        [MercuryVsdInfoHandler.OperationId] = new(MercuryVsdInfoHandler.ExampleUid, "uid", MercuryVsdInfoHandler.ExampleUid),
         ["suz.order-status"] = new("demo-order-001", "value", "demo-order-001")
     };
 
@@ -310,11 +326,18 @@
     private ApiOperationDescriptor? _selected;
     private ApiExecutionResult? _result;
     private CodeInfoResults? _codeResults;
+    private ConsoleCodeSnapshot? _codeSnapshot;
+    private string? _returnUrl;
+    private sealed record ConsoleCodeSnapshot(Guid ProfileId, string Url, ApiOperationDescriptor Operation,
+        Dictionary<string, string> Values, ApiExecutionResult? Result, CodeInfoResults? Codes, bool TechnicalMode);
     private NationalCatalogProductResult? _nationalCatalogResult;
     private DocumentStatusResults? _documentStatusResults;
     private SuzDocumentStatusResults? _suzDocumentStatusResults;
+    private MercuryVsdInfoResult? _mercuryVsd;
     private bool _technicalMode;
     private bool _running;
+    private bool _documentLookupMissing;
+    private string? _documentLookupNotice;
     private CancellationTokenSource? _executionCancellation;
     private string? _validationError;
     private InputValidationResult _fieldValidation = new([]);
@@ -339,12 +362,58 @@
     private string? _lastQuery;
     [SupplyParameterFromQuery(Name = "operation")] public string? RequestedOperation { get; set; }
     [SupplyParameterFromQuery(Name = "code")] public string? RequestedCode { get; set; }
+    [SupplyParameterFromQuery(Name = "document")] public string? RequestedDocument { get; set; }
+    [SupplyParameterFromQuery(Name = "source")] public string? RequestedSource { get; set; }
+    [SupplyParameterFromQuery(Name = "productGroup")] public string? RequestedProductGroup { get; set; }
+    [SupplyParameterFromQuery(Name = "gtin")] public string? RequestedGtin { get; set; }
+    [SupplyParameterFromQuery(Name = "vsd")] public string? RequestedVsd { get; set; }
+    [SupplyParameterFromQuery(Name = "returnTo")] public string? RequestedReturnTo { get; set; }
 
     protected override async Task OnParametersSetAsync()
     {
         var query = Navigation.ToAbsoluteUri(Navigation.Uri).Query;
         if (query == _lastQuery) return;
         _lastQuery = query;
+        if (_codeSnapshot is { } snapshot && Workbench.ProfileId == snapshot.ProfileId &&
+            Navigation.Uri == snapshot.Url)
+        {
+            _selected = snapshot.Operation;
+            _values.Clear();
+            foreach (var value in snapshot.Values) _values[value.Key] = value.Value;
+            _result = snapshot.Result;
+            _codeResults = snapshot.Codes;
+            _technicalMode = snapshot.TechnicalMode;
+            _nationalCatalogResult = null;
+            _documentStatusResults = null;
+            _suzDocumentStatusResults = null;
+            _mercuryVsd = null;
+            _documentLookupNotice = null;
+            _returnUrl = null;
+            return;
+        }
+        _returnUrl = ValidReturnUrl(RequestedReturnTo);
+        if (!string.IsNullOrWhiteSpace(RequestedVsd))
+        {
+            SelectOperation(_operations.FirstOrDefault(x => x.Id == MercuryVsdInfoHandler.OperationId));
+            _values["uid"] = RequestedVsd;
+            _technicalMode = false;
+            await ExecuteAsync();
+            return;
+        }
+        if (!string.IsNullOrWhiteSpace(RequestedGtin))
+        {
+            SelectOperation(_operations.FirstOrDefault(x => x.Id == NationalCatalogProductHandler.OperationId));
+            _values["gtin"] = RequestedGtin;
+            _technicalMode = false;
+            await ExecuteAsync();
+            return;
+        }
+        if (!string.IsNullOrWhiteSpace(RequestedDocument))
+        {
+            await RequestHistoryDocumentAsync(new(RequestedDocument,
+                RequestedSource == "suz" ? ApiSystem.Suz : ApiSystem.TrueApi, RequestedProductGroup));
+            return;
+        }
         var destination = OperationNavigation.ResolveConsole(query, _operations);
         if (destination.Code is not null)
             await RequestRelatedCodeAsync(destination.Code);
@@ -364,6 +433,8 @@
     private void SelectOperation(ApiOperationDescriptor? operation)
     {
         _unknownOperation = false;
+        _documentLookupNotice = null;
+        _documentLookupMissing = false;
         _selected = operation;
         _result = null;
         _codeResults = null;
@@ -371,6 +442,7 @@
         _nationalCatalogResult = null;
         _documentStatusResults = null;
         _suzDocumentStatusResults = null;
+        _mercuryVsd = null;
         _friendlyResult = [];
         _validationError = null;
         _fieldValidation = new([]);
@@ -393,6 +465,103 @@
         SetValue("codes", code);
         _technicalMode = false;
         await ExecuteAsync();
+    }
+
+    private void RequestHistoryDocument(CodeHistoryDocumentSelection selection)
+    {
+        if (_running) return;
+        SaveCodeSnapshot();
+        Navigation.NavigateTo(QueryHelpers.AddQueryString(OperationNavigation.DocumentUrl(selection), "returnTo", _codeSnapshot?.Url ?? Navigation.Uri));
+    }
+
+    private void RequestGtin(string gtin)
+    {
+        if (_running) return;
+        SaveCodeSnapshot();
+        Navigation.NavigateTo(QueryHelpers.AddQueryString("/console", new Dictionary<string, string?>
+        {
+            ["gtin"] = gtin, ["returnTo"] = _codeSnapshot?.Url ?? Navigation.Uri
+        }));
+    }
+
+    private void RequestVsd(string vsd)
+    {
+        if (_running) return;
+        SaveCodeSnapshot();
+        Navigation.NavigateTo(QueryHelpers.AddQueryString("/console", new Dictionary<string, string?>
+        {
+            ["vsd"] = vsd, ["returnTo"] = _codeSnapshot?.Url ?? Navigation.Uri
+        }));
+    }
+
+    private void SaveCodeSnapshot()
+    {
+        if (_selected is null || Workbench.ProfileId is not { } profileId || _codeResults is null) return;
+        _codeSnapshot = new(profileId, Navigation.Uri, _selected, new(_values, StringComparer.OrdinalIgnoreCase),
+            _result, _codeResults, _technicalMode);
+    }
+
+    private string? ValidReturnUrl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var parsed) &&
+        parsed.GetLeftPart(UriPartial.Authority) == Navigation.ToAbsoluteUri("/").GetLeftPart(UriPartial.Authority) &&
+        parsed.AbsolutePath is "/console" or "/history"
+            ? url : null;
+
+    private void ReturnToCodes()
+    {
+        if (_returnUrl is { } url) Navigation.NavigateTo(url);
+    }
+
+    private async Task RequestHistoryDocumentAsync(CodeHistoryDocumentSelection selection)
+    {
+        if (_running) return;
+        if (Workbench.ProfileId is null)
+        {
+            _validationError = "Выберите профиль для запроса документа.";
+            return;
+        }
+        if (!CodeHistoryDocumentLookup.IsValidId(selection.DocumentId))
+        {
+            _validationError = "Недопустимый идентификатор документа.";
+            return;
+        }
+        SelectOperation(_operations.FirstOrDefault(x => x.Id == (selection.Source == ApiSystem.Suz
+            ? SuzDocumentStatusHandler.OperationId : TrueApiDocumentStatusHandler.OperationId)));
+        _values["documentId"] = selection.DocumentId;
+        if (selection.ProductGroup == "furs" && selection.Source == ApiSystem.TrueApi) _values["productGroup"] = "furs";
+        _technicalMode = false;
+        _running = true;
+        _executionCancellation = new CancellationTokenSource();
+        StateHasChanged();
+        try
+        {
+            var lookup = await DocumentLookup.ExecuteAsync(selection, Workbench.ProfileId.Value, _executionCancellation.Token);
+            var operationId = lookup.System == ApiSystem.Suz ? SuzDocumentStatusHandler.OperationId : TrueApiDocumentStatusHandler.OperationId;
+            if (_selected?.Id != operationId)
+            {
+                SelectOperation(_operations.FirstOrDefault(x => x.Id == operationId));
+                _values["documentId"] = selection.DocumentId;
+            }
+            _result = lookup.Result;
+            _documentStatusResults = lookup.System == ApiSystem.TrueApi && _result.Success ? DocumentStatusResults.Parse(_result.ResponseBody) : null;
+            _suzDocumentStatusResults = lookup.System == ApiSystem.Suz && _result.Success ? SuzDocumentStatusResults.Parse(_result.ResponseBody) : null;
+            _friendlyResult = BuildFriendlyResult(_result.ResponseBody);
+            _documentLookupMissing = lookup.NotFound;
+            _documentLookupNotice = lookup.NotFound
+                ? lookup.CheckedBothSystems ? "Документ не найден ни в True API, ни в СУЗ." : $"Документ не найден в {(lookup.System == ApiSystem.Suz ? "СУЗ" : "True API")}."
+                : lookup.Result.Success ? $"Документ получен из {(lookup.System == ApiSystem.Suz ? "СУЗ" : "True API")}."
+                    : $"Запрос документа в {(lookup.System == ApiSystem.Suz ? "СУЗ" : "True API")} завершился ошибкой.";
+        }
+        catch (OperationCanceledException) when (_executionCancellation.IsCancellationRequested)
+        {
+            _validationError = "Запрос отменён.";
+        }
+        finally
+        {
+            _running = false;
+            _executionCancellation?.Dispose();
+            _executionCancellation = null;
+        }
     }
 
     private string GetValue(string name) => _values.GetValueOrDefault(name, string.Empty);
@@ -516,6 +685,8 @@
     };
     private void OnProfileChanged(object? sender, Guid? profileId) => _ = InvokeAsync(async () =>
     {
+        _codeSnapshot = null;
+        _returnUrl = null;
         await RefreshBulkJobsAsync();
         StateHasChanged();
     });
@@ -557,6 +728,8 @@
                 ? DocumentStatusResults.Parse(_result.ResponseBody) : null;
             _suzDocumentStatusResults = _selected.Id == SuzDocumentStatusHandler.OperationId && _result.Success
                 ? SuzDocumentStatusResults.Parse(_result.ResponseBody) : null;
+            _mercuryVsd = _selected.Id == MercuryVsdInfoHandler.OperationId && _result.Success
+                ? MercuryVsdInfoResult.Parse(_result.ResponseBody) : null;
             _friendlyResult = BuildFriendlyResult(_result.ResponseBody);
         }
         catch (OperationCanceledException) when (_executionCancellation.IsCancellationRequested)
@@ -617,7 +790,7 @@
 
     private Task CopyRequestAsync() => JavaScript.InvokeVoidAsync("crptWorkbench.copyText", $"{_result?.HttpMethod} {_result?.RequestUrl}\n{_result?.RequestHeaders}\n\n{_result?.RequestBody}").AsTask();
     private Task CopyResponseAsync() => JavaScript.InvokeVoidAsync("crptWorkbench.copyText", $"{_result?.ResponseHeaders}\n\n{_result?.ResponseBody}").AsTask();
-    private static string SystemName(ApiSystem system) => system switch { ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", _ => "СУЗ" };
+    private static string SystemName(ApiSystem system) => system switch { ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", ApiSystem.Mercury => "Меркурий", _ => "СУЗ" };
 
     public ValueTask DisposeAsync()
     {

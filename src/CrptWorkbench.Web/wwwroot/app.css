@@ -255,6 +255,9 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 .code-history-table th { color: var(--muted); font-weight: 600; }
 .code-history-table td small { display: block; margin-top: 4px; }
 .code-history-table .code-history-id { min-width: 200px; overflow-wrap: anywhere; }
+.code-history-link { display: inline; padding: 2px 4px; margin: -2px -4px; border: 0; border-radius: 5px; background: transparent; color: var(--accent); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; transition: color .18s ease, background-color .18s ease, box-shadow .18s ease; }
+.code-history-link:hover, .code-history-link:focus-visible { color: var(--heading); background: color-mix(in srgb, var(--accent) 17%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+.code-history-link:disabled { opacity: .55; cursor: wait; }
 .code-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; font-size: .85rem; }
 .detail-field { min-width: 0; display: grid; align-content: start; gap: 5px; border: 1px solid color-mix(in srgb, var(--line) 72%, transparent); border-radius: 8px; background: var(--surface); padding: 10px 11px; }
 .detail-field-wide { grid-column: 1 / -1; }

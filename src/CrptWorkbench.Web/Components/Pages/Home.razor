@@ -101,6 +101,6 @@
         ? "Корректировка сведений о кодах" : _names.GetValueOrDefault(id, "Другая операция");
     private static string SystemName(ApiSystem system) => system switch
     {
-        ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", ApiSystem.Suz => "СУЗ", _ => "Другая система"
+        ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог", ApiSystem.Suz => "СУЗ", ApiSystem.Mercury => "Меркурий", _ => "Другая система"
     };
 }
