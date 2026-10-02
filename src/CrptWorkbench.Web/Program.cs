@@ -20,6 +20,8 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 
 var integrationOptions = new CrptIntegrationOptions();
+ValidateAuthenticationMode(builder.Configuration["Crpt:TrueApiAuthMode"], "Crpt:TrueApiAuthMode");
+ValidateAuthenticationMode(builder.Configuration["Crpt:SuzAuthMode"], "Crpt:SuzAuthMode");
 builder.Configuration.GetSection(CrptIntegrationOptions.SectionName).Bind(integrationOptions);
 integrationOptions.DataDirectory = ResolveDataDirectory(integrationOptions, builder.Environment.ContentRootPath);
 Log.Logger = WorkbenchLogging.CreateLogger(builder.Configuration, integrationOptions.DataDirectory);
@@ -66,8 +68,14 @@ try
     builder.Services.AddSingleton<ICertificateService, WindowsCertificateService>();
     builder.Services.AddSingleton<ICertificateSignatureService, CryptoProCertificateSignatureService>();
     builder.Services.AddSingleton(TimeProvider.System);
-    builder.Services.AddSingleton<ITrueApiTokenProvider, TrueApiTokenProvider>();
-    builder.Services.AddSingleton<ISuzTokenProvider, SuzTokenProvider>();
+    if (integrationOptions.TrueApiAuthMode == CrptAuthenticationMode.Manual)
+        builder.Services.AddSingleton<ITrueApiTokenProvider, ManualTrueApiTokenProvider>();
+    else
+        builder.Services.AddSingleton<ITrueApiTokenProvider, TrueApiTokenProvider>();
+    if (integrationOptions.SuzAuthMode == CrptAuthenticationMode.Manual)
+        builder.Services.AddSingleton<ISuzTokenProvider, ManualSuzTokenProvider>();
+    else
+        builder.Services.AddSingleton<ISuzTokenProvider, SuzTokenProvider>();
     builder.Services.AddSingleton<ITraceXDbConnectionFactory, TraceXDbConnectionFactory>();
     builder.Services.AddSingleton<ITraceXConnectionStringValidator, TraceXConnectionStringValidator>();
     builder.Services.AddSingleton(new TraceXConnectionTesterOptions(TimeSpan.FromSeconds(10)));
@@ -79,6 +87,7 @@ try
     builder.Services.AddCrptClients(integrationOptions);
     builder.Services.AddScoped<IApiOperationHandler, TrueApiCodeInfoHandler>();
     builder.Services.AddScoped<IApiOperationHandler, TrueApiBulkCodeInfoHandler>();
+    builder.Services.AddScoped<IApiOperationHandler, TrueApiAggregationTreeHandler>();
     builder.Services.AddScoped<IApiOperationHandler, TrueApiDocumentStatusHandler>();
     builder.Services.AddScoped<IApiOperationHandler, NationalCatalogProductHandler>();
     builder.Services.AddScoped<IApiOperationHandler, SuzDocumentStatusHandler>();
@@ -90,6 +99,7 @@ try
     builder.Services.AddScoped<FavoriteApiOperationService>();
     builder.Services.AddScoped<FavoriteProductGroupService>();
     builder.Services.AddScoped<ProfileService>();
+    builder.Services.AddScoped<ManualTokenService>();
     builder.Services.AddScoped<HistoryService>();
     builder.Services.AddScoped<PackageDocumentHistory>();
     builder.Services.AddScoped<PackageDocumentService>();
@@ -243,6 +253,10 @@ static string ResolveDataDirectory(CrptIntegrationOptions options, string conten
 
 static void ValidateOptions(CrptIntegrationOptions options)
 {
+    if (!Enum.IsDefined(options.TrueApiAuthMode))
+        throw new InvalidOperationException("Crpt:TrueApiAuthMode must be Auto or Manual.");
+    if (!Enum.IsDefined(options.SuzAuthMode))
+        throw new InvalidOperationException("Crpt:SuzAuthMode must be Auto or Manual.");
     if (options.TokenCacheHours is < 1 or > 9)
         throw new InvalidOperationException("Crpt:TokenCacheHours must be between 1 and 9.");
     if (options.Mode == CrptIntegrationMode.Production &&
@@ -255,6 +269,12 @@ static void ValidateOptions(CrptIntegrationOptions options)
         (!string.Equals(options.CertificateStoreName, "My", StringComparison.OrdinalIgnoreCase) ||
          !string.Equals(options.CertificateStoreLocation, "LocalMachine", StringComparison.OrdinalIgnoreCase)))
         throw new InvalidOperationException("Production certificates must be read from LocalMachine/My.");
+}
+
+static void ValidateAuthenticationMode(string? value, string setting)
+{
+    if (value is not null && (!Enum.TryParse<CrptAuthenticationMode>(value, true, out var mode) || !Enum.IsDefined(mode)))
+        throw new InvalidOperationException($"{setting} must be Auto or Manual.");
 }
 
 

@@ -106,7 +106,7 @@ public sealed class ProductionTrueApiTests
         using var configuration = (ConfigurationRoot)new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Serilog:FullLoggingEnabled"] = "true"
+                ["WorkbenchLogging:HttpDetailsEnabled"] = "true"
             })
             .Build();
         using var logging = new LoggingHandler(logger, configuration)
@@ -132,9 +132,9 @@ public sealed class ProductionTrueApiTests
 
         var messages = string.Join(Environment.NewLine, logger.Messages);
         Assert.Contains("Authorization", messages);
-        Assert.Contains(token, messages);
-        Assert.Contains(requestSecret, messages);
-        Assert.Contains(responseSecret, messages);
+        Assert.DoesNotContain(token, messages);
+        Assert.DoesNotContain(requestSecret, messages);
+        Assert.DoesNotContain(responseSecret, messages);
         Assert.Contains(responseSecret, responseBody);
     }
 

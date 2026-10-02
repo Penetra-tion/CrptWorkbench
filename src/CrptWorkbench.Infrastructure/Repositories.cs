@@ -36,6 +36,32 @@ public sealed class ProfileRepository(IDbContextFactory<WorkbenchDbContext> fact
 
 public sealed class ApiRequestLogRepository(IDbContextFactory<WorkbenchDbContext> factory) : IApiRequestLogRepository
 {
+    public async Task<RecordPage<ApiRequestLog>> ListPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var query = db.ApiRequestLogs.AsNoTracking().Where(x => x.ProfileId == profileId);
+        var total = await query.LongCountAsync(cancellationToken);
+        if (cursor is not null)
+        {
+            var boundaryIds = cursor.BoundaryIds.ToArray();
+            query = query.Where(x => x.CreatedAtUnixMs < cursor.CreatedAtUnixMs ||
+                (x.CreatedAtUnixMs == cursor.CreatedAtUnixMs && !boundaryIds.Contains(x.Id)));
+        }
+        var rows = await query.OrderByDescending(x => x.CreatedAtUnixMs).ThenBy(x => x.Id)
+            .Take(RecordPage<ApiRequestLog>.Size + 1).ToListAsync(cancellationToken);
+        var more = rows.Count > RecordPage<ApiRequestLog>.Size;
+        var items = rows.Take(RecordPage<ApiRequestLog>.Size).ToArray();
+        RecordPageCursor? next = null;
+        if (more)
+        {
+            var timestamp = items[^1].CreatedAtUnixMs;
+            var ids = items.Where(x => x.CreatedAtUnixMs == timestamp).Select(x => x.Id);
+            if (cursor?.CreatedAtUnixMs == timestamp) ids = cursor.BoundaryIds.Concat(ids);
+            next = new(timestamp, ids.ToArray());
+        }
+        return new(items, next, total);
+    }
+
     public async Task UpsertBulkSummaryAsync(ApiRequestLog entry, CancellationToken cancellationToken = default)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);

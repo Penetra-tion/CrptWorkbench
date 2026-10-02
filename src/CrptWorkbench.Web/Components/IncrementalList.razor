@@ -1,0 +1,41 @@
+@typeparam TItem
+@if (ItemsContent is not null)
+{
+    @ItemsContent(_items.Take(_limit).ToArray())
+}
+else if (ChildContent is not null)
+{
+    @foreach (var item in _items.Take(_limit))
+    {
+        @ChildContent(item)
+    }
+}
+@if (ControlsContent is not null)
+{
+    @ControlsContent(Controls)
+}
+else
+{
+    @Controls
+}
+@code {
+    [Parameter, EditorRequired] public IEnumerable<TItem> Items { get; set; } = Array.Empty<TItem>();
+    [Parameter] public RenderFragment<TItem>? ChildContent { get; set; }
+    [Parameter] public RenderFragment<IReadOnlyList<TItem>>? ItemsContent { get; set; }
+    [Parameter] public RenderFragment<RenderFragment>? ControlsContent { get; set; }
+    [Parameter] public object? ResetKey { get; set; }
+    private IEnumerable<TItem>? _previousItems;
+    private object? _previousKey;
+    private IReadOnlyList<TItem> _items = Array.Empty<TItem>();
+    private int _limit = 100;
+    protected override void OnParametersSet()
+    {
+        if (ResetKey is null ? !ReferenceEquals(_previousItems, Items) || _previousKey is not null : !Equals(_previousKey, ResetKey))
+            _limit = 100;
+        _previousItems = Items;
+        _previousKey = ResetKey;
+        _items = Items as IReadOnlyList<TItem> ?? Items.ToArray();
+    }
+    private void More() => _limit = (int)Math.Min((long)_limit + 100, _items.Count);
+    private RenderFragment Controls => @<ShowMore VisibleCount="@Math.Min(_limit, _items.Count)" TotalCount="@((long)_items.Count)" HasMore="@(_limit < _items.Count)" OnMore="More" />;
+}

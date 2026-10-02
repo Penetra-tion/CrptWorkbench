@@ -5,6 +5,32 @@ namespace CrptWorkbench.Infrastructure;
 
 public sealed class PackageDocumentRepository(IDbContextFactory<WorkbenchDbContext> factory) : IPackageDocumentRepository
 {
+    public async Task<RecordPage<PackageDocument>> ListPageAsync(Guid profileId, PackageOperationKind kind, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var query = db.PackageDocuments.AsNoTracking().Where(x => x.ProfileId == profileId && x.OperationKind == kind);
+        var total = await query.LongCountAsync(cancellationToken);
+        if (cursor is not null)
+        {
+            var boundaryIds = cursor.BoundaryIds.ToArray();
+            query = query.Where(x => x.CreatedAtUnixMs < cursor.CreatedAtUnixMs ||
+                (x.CreatedAtUnixMs == cursor.CreatedAtUnixMs && !boundaryIds.Contains(x.Id)));
+        }
+        var rows = await query.OrderByDescending(x => x.CreatedAtUnixMs).ThenBy(x => x.Id)
+            .Take(RecordPage<PackageDocument>.Size + 1).ToListAsync(cancellationToken);
+        var more = rows.Count > RecordPage<PackageDocument>.Size;
+        var items = rows.Take(RecordPage<PackageDocument>.Size).ToArray();
+        RecordPageCursor? next = null;
+        if (more)
+        {
+            var timestamp = items[^1].CreatedAtUnixMs;
+            var ids = items.Where(x => x.CreatedAtUnixMs == timestamp).Select(x => x.Id);
+            if (cursor?.CreatedAtUnixMs == timestamp) ids = cursor.BoundaryIds.Concat(ids);
+            next = new(timestamp, ids.ToArray());
+        }
+        return new(items, next, total);
+    }
+
     public async Task<bool> ScheduleAsync(Guid profileId, Guid id, PackageOperationKind kind, long nowUnixMs, bool resume,
         CancellationToken cancellationToken = default)
     {
@@ -55,7 +81,16 @@ public sealed class PackageDocumentRepository(IDbContextFactory<WorkbenchDbConte
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         return await db.PackageDocuments.AsNoTracking().Where(x => x.ProfileId == profileId && x.OperationKind == kind)
-            .OrderByDescending(x => x.CreatedAtUnixMs).Take(200).ToListAsync(cancellationToken);
+            .OrderByDescending(x => x.CreatedAtUnixMs).ThenBy(x => x.Id).ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<PackageDocument>> GetManyAsync(Guid profileId, PackageOperationKind kind, IReadOnlyList<Guid> ids, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var result = new List<PackageDocument>();
+        foreach (var chunk in ids.Chunk(500))
+            result.AddRange(await db.PackageDocuments.AsNoTracking().Where(x => x.ProfileId == profileId && x.OperationKind == kind && chunk.Contains(x.Id)).ToListAsync(cancellationToken));
+        return result.OrderByDescending(x => x.CreatedAtUnixMs).ThenBy(x => x.Id).ToArray();
     }
 
     public async Task<PackageDocument?> GetAsync(Guid id, CancellationToken cancellationToken = default)

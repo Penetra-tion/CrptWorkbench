@@ -58,29 +58,23 @@
 {
     <section class="panel">
         <h2>Предпросмотр: @_preview.Rows.Count вложений, @_preview.PackageCount упаковок</h2>
-        @if (_preview.Errors.Count > 0) { <div class="notice error" role="alert">@foreach (var error in _preview.Errors) { <p>@error</p> }</div> }
+        @if (_preview.Errors.Count > 0) { <div class="notice error" role="alert"><IncrementalList Items="_preview.Errors" ResetKey="_preview" Context="error"><p>@error</p></IncrementalList></div> }
         @if (_preview.Rows.Count > 0)
         {
             <p class="muted">Будет отправлено документов: @_preview.PackageCount. Раскройте упаковку, чтобы проверить состав.</p>
             <div class="package-compositions">
-                @foreach (var package in _preview.Rows.GroupBy(x => x.Package, StringComparer.Ordinal).Skip(_packagePage * 50).Take(50))
+                @foreach (var package in _preview.Rows.GroupBy(x => x.Package, StringComparer.Ordinal).Take(_visiblePackages))
                 {
                     <details class="package-composition" @key="package.Key">
                         <summary><code>@package.Key</code><span>@package.Count() вложений</span></summary>
                         <div class="table-wrap"><table><thead><tr><th>Строка</th><th>Код вложения</th></tr></thead><tbody>
-                            @foreach (var row in package.Skip(_itemPages.GetValueOrDefault(package.Key) * 100).Take(100)) { <tr><td>@row.Line</td><td><code>@row.Item</code></td></tr> }
+                            @foreach (var row in package.Take(_visibleItems.GetValueOrDefault(package.Key, 100))) { <tr><td>@row.Line</td><td><code>@row.Item</code></td></tr> }
                         </tbody></table></div>
-                        @if (package.Count() > 100)
-                        {
-                            <div class="actions"><button class="button ghost" disabled="@(_itemPages.GetValueOrDefault(package.Key) == 0)" @onclick="() => ChangeItemPage(package.Key, -1)">Назад</button><span>@(_itemPages.GetValueOrDefault(package.Key) + 1) / @((package.Count() + 99) / 100)</span><button class="button ghost" disabled="@((_itemPages.GetValueOrDefault(package.Key) + 1) * 100 >= package.Count())" @onclick="() => ChangeItemPage(package.Key, 1)">Далее</button></div>
-                        }
+                        <ShowMore VisibleCount="Math.Min(_visibleItems.GetValueOrDefault(package.Key, 100), package.Count())" TotalCount="package.Count()" HasMore="@(_visibleItems.GetValueOrDefault(package.Key, 100) < package.Count())" OnMore="() => ShowMoreItems(package.Key)" />
                     </details>
                 }
             </div>
-            @if (_preview.PackageCount > 50)
-            {
-                <div class="actions"><button class="button ghost" disabled="@(_packagePage == 0)" @onclick="() => _packagePage--">Назад</button><span>Упаковки: страница @(_packagePage + 1) / @((_preview.PackageCount + 49) / 50)</span><button class="button ghost" disabled="@((_packagePage + 1) * 50 >= _preview.PackageCount)" @onclick="() => _packagePage++">Далее</button></div>
-            }
+            <ShowMore VisibleCount="Math.Min(_visiblePackages, _preview.PackageCount)" TotalCount="_preview.PackageCount" HasMore="@(_visiblePackages < _preview.PackageCount)" OnMore="() => _visiblePackages += 100" />
         }
         <div class="actions submit-actions">
             <button type="button" class="button primary" @onclick="SubmitAsync" disabled="@(_busy || _preview.Errors.Count > 0 || _preview.Rows.Count == 0 || Workbench.ProfileId is null)">@(_busy ? "Отправляем…" : "Подписать и отправить")</button>
@@ -89,7 +83,7 @@
 }
 
 <section class="panel">
-    <div class="panel-title"><h2>Отправленные документы</h2><button type="button" class="button ghost" @onclick="LoadAsync" disabled="@_busy">Обновить</button></div>
+    <div class="panel-title"><h2>Отправленные документы</h2><button type="button" class="button ghost" @onclick="RefreshDocumentsAsync" disabled="@_busy">Обновить</button></div>
     @if (Workbench.ProfileId is null) { <p>Выберите профиль.</p> }
     else if (_loadingDocuments && _documents.Count == 0) { <p class="muted" role="status">Загружаем документы…</p> }
     else if (_documents.Count == 0) { <p class="muted">Документов пока нет.</p> }
@@ -106,6 +100,7 @@
                     <td>@if (doc.DocumentId is not null && doc.State is "Paused" or "Tracking") { <button type="button" class="button ghost" @onclick="() => ContinueAsync(doc.Id, doc.State)" disabled="@_busy">@(doc.State == "Paused" ? "Возобновить на 24 часа" : "Проверить сейчас")</button> }</td></tr>
             }
         </tbody></table></div>
+        <ShowMore VisibleCount="_documents.Count" TotalCount="_documentTotal" HasMore="@(_documentCursor is not null)" Loading="_loadingDocuments" Disabled="_busy" OnMore="LoadMoreDocumentsAsync" />
     }
 </section>
 
@@ -129,8 +124,8 @@
         ("sweets", "Сладости"), ("carparts", "Автозапчасти")
     ];
     private bool _createSet;
-    private int _packagePage;
-    private readonly Dictionary<string, int> _itemPages = new(StringComparer.Ordinal);
+    private int _visiblePackages = 100;
+    private readonly Dictionary<string, int> _visibleItems = new(StringComparer.Ordinal);
     private DotNetObjectReference<PackageAggregation>? _inputReference;
     private IEnumerable<(string Code, string Name)> SupportedGroups => Groups.Where(x => !_createSet || PackageSetRules.SupportsGroup(x.Code));
     private string _group = "milk";
@@ -145,6 +140,8 @@
     private string? _message;
     private TransformationPreview? _preview;
     private IReadOnlyList<PackageDocument> _documents = [];
+    private RecordPageCursor? _documentCursor;
+    private long? _documentTotal;
     private readonly HashSet<string> _favoriteGroupCodes = new(StringComparer.Ordinal);
     private IJSObjectReference? _dropModule;
     private readonly CancellationTokenSource _refreshCancellation = new();
@@ -168,13 +165,13 @@
     }
     private void ProfileChanged(object? sender, Guid? id) => _ = InvokeAsync(async () =>
     {
-        _contextVersion++;
+        _contextVersion++; ++_documentLoadVersion; _loadingDocuments = false;
         _text = string.Empty;
         if (_dropModule is not null) await _dropModule.InvokeVoidAsync("setText", "package-text-input", "");
         _preview = null;
         _previewProfileId = null;
         _message = null;
-        _documents = [];
+        _documents = []; _documentCursor = null; _documentTotal = null;
         _favoriteGroupCodes.Clear();
         await LoadFavoriteGroupsAsync();
         await LoadAsync();
@@ -189,7 +186,7 @@
         if (!VisibleGroups.Any()) _favoriteGroupsOnly = false;
         if (!VisibleGroups.Any(x => x.Code == _group)) _group = VisibleGroups.FirstOrDefault().Code ?? SupportedGroups.First().Code;
     }
-    private void ChangeItemPage(string package, int delta) => _itemPages[package] = _itemPages.GetValueOrDefault(package) + delta;
+    private void ShowMoreItems(string package) => _visibleItems[package] = _visibleItems.GetValueOrDefault(package, 100) + 100;
     private async Task PreviewAsync()
     {
         if (_busy || _dropModule is null) return;
@@ -302,7 +299,7 @@
         await _dropModule.InvokeVoidAsync("setText", "package-text-input", _text);
         _preview = null; _previewProfileId = null; _message = "Загружено строк из TraceX.";
     }
-    private void Preview() { _packagePage = 0; _itemPages.Clear(); _preview = PackageAggregationService.Parse(_text, _createSet); _previewProfileId = Workbench.ProfileId; _message = _preview.Errors.Count == 0 ? "Строки проверены. Можно отправлять документы." : "Исправьте ошибки в файле или поле ввода."; }
+    private void Preview() { _visiblePackages = 100; _visibleItems.Clear(); _preview = PackageAggregationService.Parse(_text, _createSet); _previewProfileId = Workbench.ProfileId; _message = _preview.Errors.Count == 0 ? "Строки проверены. Можно отправлять документы." : "Исправьте ошибки в файле или поле ввода."; }
     private async Task SubmitAsync()
     {
         if (_busy || _preview is null || _preview.Errors.Count > 0 || _preview.Rows.Count == 0 || Workbench.ProfileId is not { } profileId || _previewProfileId != profileId) return;
@@ -310,30 +307,57 @@
         _busy = true;
         try
         {
+            ++_documentLoadVersion; _loadingDocuments = false; _documents = []; _documentCursor = null; _documentTotal = null;
             var sent = await Aggregations.SubmitAsync(profileId, _group, _createSet ? "SET" : "AUTO", _preview.Rows, _refreshCancellation.Token);
             if (_disposed || version != _contextVersion) return;
             _message = $"Создано заданий: {sent.Count}. Статусы обновляются автоматически.";
             _preview = null;
+            _documents = []; _documentCursor = null; _documentTotal = null;
             await LoadAsync();
         }
         catch (OperationCanceledException) when (_disposed) { }
         catch (Exception) { if (version == _contextVersion) { _message = "Отправка прервана. Проверьте результаты документов перед новой отправкой."; await LoadAsync(); } }
         finally { _busy = false; }
     }
-    private async Task LoadAsync()
+    private Task LoadAsync() => LoadDocumentsAsync(false);
+    private Task RefreshDocumentsAsync()
     {
-        var version = ++_documentLoadVersion;
-        var context = _contextVersion;
-        var profileId = Workbench.ProfileId;
+        ++_documentLoadVersion;
+        _loadingDocuments = false;
+        _documents = []; _documentCursor = null; _documentTotal = null;
+        return LoadAsync();
+    }
+    private Task LoadMoreDocumentsAsync() => LoadDocumentsAsync(true);
+    private async Task LoadDocumentsAsync(bool append)
+    {
+        if (_loadingDocuments || (append && _documentCursor is null)) return;
+        var load = ++_documentLoadVersion; var context = _contextVersion; var profile = Workbench.ProfileId;
         _loadingDocuments = true;
         try
         {
-            var documents = profileId is { } id ? await Aggregations.ListAsync(id, _refreshCancellation.Token) : [];
-            if (!_disposed && context == _contextVersion && version == _documentLoadVersion) _documents = documents;
+            if (profile is not { } id) { _documents = []; _documentCursor = null; _documentTotal = null; return; }
+            if (!append && _documents.Count > 0)
+            {
+                var refreshed = await Aggregations.GetManyAsync(id, _documents.Select(x => x.Id).ToArray(), _refreshCancellation.Token);
+                if (!_disposed && context == _contextVersion && load == _documentLoadVersion)
+                {
+                    if (_documentTotal is { } total) _documentTotal = Math.Max(refreshed.Count, total - (_documents.Count - refreshed.Count));
+                    _documents = refreshed;
+                }
+            }
+            else
+            {
+                var page = await Aggregations.ListPageAsync(id, append ? _documentCursor : null, _refreshCancellation.Token);
+                if (!_disposed && context == _contextVersion && load == _documentLoadVersion)
+                {
+                    _documents = append ? _documents.Concat(page.Items).DistinctBy(x => x.Id).ToArray() : page.Items;
+                    _documentCursor = page.NextCursor; _documentTotal = page.TotalCount;
+                }
+            }
         }
         catch (OperationCanceledException) when (_disposed) { }
-        catch (Exception) { if (!_disposed && context == _contextVersion && version == _documentLoadVersion) _message = "Не удалось обновить документы. Повторите обновление."; }
-        finally { if (version == _documentLoadVersion) _loadingDocuments = false; }
+        catch (Exception) { if (!_disposed && context == _contextVersion && load == _documentLoadVersion) _message = "Не удалось обновить документы. Повторите обновление."; }
+        finally { if (load == _documentLoadVersion) _loadingDocuments = false; }
     }
     private async Task ContinueAsync(Guid id, string state)
     {

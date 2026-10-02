@@ -119,6 +119,12 @@ public sealed class CodeCorrectionService(
         finally { Interlocked.Exchange(ref _busy, 0); }
     }
 
+    public Task<RecordPage<PackageDocument>> ListPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default) =>
+        documents.ListPageAsync(profileId, PackageOperationKind.CodeCorrection, cursor, cancellationToken);
+
+    public Task<IReadOnlyList<PackageDocument>> GetManyAsync(Guid profileId, IReadOnlyList<Guid> ids, CancellationToken cancellationToken = default) =>
+        documents.GetManyAsync(profileId, PackageOperationKind.CodeCorrection, ids, cancellationToken);
+
     public Task<IReadOnlyList<PackageDocument>> ListAsync(Guid profileId, CancellationToken cancellationToken = default) =>
         documents.ListAsync(profileId, PackageOperationKind.CodeCorrection, cancellationToken);
     public Task ResumeAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default) =>

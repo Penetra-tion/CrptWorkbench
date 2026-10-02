@@ -13,7 +13,8 @@ public sealed class ProfileService(
     ITrueApiTokenProvider trueApiTokens,
     ITraceXConnectionTester traceXConnectionTester,
     ITraceXConnectionStringValidator traceXConnectionStringValidator,
-    ISensitiveDataMasker sensitiveDataMasker)
+    ISensitiveDataMasker sensitiveDataMasker,
+    CrptIntegrationOptions? options = null)
 {
     private static string TraceXSecretKey(Guid profileId) => $"profile:{profileId}:tracex:connection-string";
     internal static string NationalCatalogBearerTokenKey(Guid profileId) => $"profile:{profileId}:national-catalog:bearer-token";
@@ -48,6 +49,9 @@ public sealed class ProfileService(
 
     public Task ClearNationalCatalogBearerTokenAsync(Guid profileId, CancellationToken cancellationToken = default) =>
         secrets.DeleteAsync(NationalCatalogBearerTokenKey(profileId), cancellationToken);
+
+    public async Task<bool> HasManualTrueApiTokenAsync(Guid profileId, CancellationToken cancellationToken = default) =>
+        !string.IsNullOrWhiteSpace(await secrets.GetAsync(ManualTokens.Key(profileId, ApiSystem.TrueApi), cancellationToken));
 
     public async Task<TraceXConnectionState> GetTraceXConnectionStateAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
@@ -96,6 +100,13 @@ public sealed class ProfileService(
         var correlationId = Guid.NewGuid().ToString("N");
         try
         {
+            if (options?.TrueApiAuthMode == CrptAuthenticationMode.Manual)
+            {
+                var configured = await HasManualTrueApiTokenAsync(profileId, cancellationToken);
+                return new(configured, configured
+                    ? "Ручной токен True API сохранён. Его действительность проверится при запросе."
+                    : "Ручной токен True API не задан. Сохраните его в настройках профиля.", correlationId);
+            }
             var profile = await repository.GetAsync(profileId, cancellationToken)
                 ?? throw new InvalidOperationException("Профиль не найден.");
             var authentication = new IntegrationAuthenticationContext(profile.Id, profile.Inn, profile.CertificateThumbprint);
@@ -111,6 +122,9 @@ public sealed class ProfileService(
 
 public sealed class HistoryService(IApiRequestLogRepository repository)
 {
+    public Task<RecordPage<ApiRequestLog>> ListPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default) =>
+        repository.ListPageAsync(profileId, cursor, cancellationToken);
+
     public Task<IReadOnlyList<ApiRequestLog>> ListAsync(Guid profileId, int take = 100, CancellationToken cancellationToken = default) => repository.ListAsync(profileId, take, cancellationToken);
     public Task<ApiRequestLog?> GetAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default) => repository.GetAsync(profileId, id, cancellationToken);
 }

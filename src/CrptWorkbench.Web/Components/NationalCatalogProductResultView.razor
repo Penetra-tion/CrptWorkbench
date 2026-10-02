@@ -28,8 +28,8 @@
     }
     else
     {
-        <div class="table-wrap"><table><thead><tr><th>GTIN</th><th>Уровень</th><th>Количество единиц</th></tr></thead>
-        <tbody>@foreach (var package in visiblePackages) { <tr><td>@package.Gtin</td><td>@package.Level</td><td>@package.Multiplier</td></tr> }</tbody></table></div>
+        <IncrementalList Items="@visiblePackages" ResetKey="@Result"><ItemsContent Context="packages"><div class="table-wrap"><table><thead><tr><th>GTIN</th><th>Уровень</th><th>Количество единиц</th></tr></thead>
+        <tbody>@foreach (var package in packages) { <tr><td>@package.Gtin</td><td>@package.Level</td><td>@package.Multiplier</td></tr> }</tbody></table></div></ItemsContent></IncrementalList>
     }
 
     <h3>Разрешительные документы</h3>
@@ -39,8 +39,8 @@
     }
     else
     {
-        <div class="table-wrap"><table><thead><tr><th>Тип</th><th>Номер</th><th>Дата оформления</th></tr></thead>
-        <tbody>@foreach (var document in Result.Documents) { <tr><td>@document.Type</td><td>@document.Number</td><td>@(document.Date ?? "Не указано")</td></tr> }</tbody></table></div>
+        <IncrementalList Items="@Result.Documents" ResetKey="@Result"><ItemsContent Context="documents"><div class="table-wrap"><table><thead><tr><th>Тип</th><th>Номер</th><th>Дата оформления</th></tr></thead>
+        <tbody>@foreach (var document in documents) { <tr><td>@document.Type</td><td>@document.Number</td><td>@(document.Date ?? "Не указано")</td></tr> }</tbody></table></div></ItemsContent></IncrementalList>
     }
 }
 
@@ -55,3 +55,4 @@
     private static bool IsRequestedTradeUnit(string gtin, NationalCatalogPackage package) =>
         package.Multiplier == 1 && string.Equals(package.Gtin, gtin, StringComparison.OrdinalIgnoreCase);
 }
+

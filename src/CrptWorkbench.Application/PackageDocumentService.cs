@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -121,6 +121,12 @@ public sealed class PackageDocumentService(
         }
         return result;
     }
+
+    public Task<RecordPage<PackageDocument>> ListPageAsync(Guid profileId, PackageOperationKind kind, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default) =>
+        repository.ListPageAsync(profileId, kind, cursor, cancellationToken);
+
+    public Task<IReadOnlyList<PackageDocument>> GetManyAsync(Guid profileId, PackageOperationKind kind, IReadOnlyList<Guid> ids, CancellationToken cancellationToken = default) =>
+        repository.GetManyAsync(profileId, kind, ids, cancellationToken);
 
     public Task<IReadOnlyList<PackageDocument>> ListAsync(Guid profileId, PackageOperationKind kind, CancellationToken cancellationToken = default) =>
         repository.ListAsync(profileId, kind, cancellationToken);

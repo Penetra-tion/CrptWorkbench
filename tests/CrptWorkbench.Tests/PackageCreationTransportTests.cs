@@ -124,7 +124,7 @@ public sealed class PackageCreationTransportTests
     {
         var logger = new CaptureLogger();
         using var configuration = (ConfigurationRoot)new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-            { ["Serilog:FullLoggingEnabled"] = "true" }).Build();
+            { ["WorkbenchLogging:HttpDetailsEnabled"] = "true" }).Build();
         using var factory = new Factory();
         using var handler = new LoggingHandler(logger, configuration) { InnerHandler = new Factory.Handler(factory) };
         using var invoker = new HttpMessageInvoker(handler);

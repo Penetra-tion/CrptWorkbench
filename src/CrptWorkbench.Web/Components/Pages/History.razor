@@ -23,7 +23,9 @@
                     <tr class="request-row @(_selected?.Id == item.Id ? "selected" : null)" role="link" tabindex="0" aria-label="@($"Открыть запрос: {OperationName(item.OperationId)}")" aria-current="@(_selected?.Id == item.Id ? "true" : null)" @onclick="() => OpenHistory(item.Id)" @onkeydown="args => OnRowKeyDown(args, item.Id)"><td>@item.CreatedAt.ToLocalTime().ToString("dd.MM HH:mm:ss")</td><td>@SystemName(item.System)</td><td><a class="history-operation-link" href="@($"/history?id={item.Id}")" tabindex="-1" @onclick:stopPropagation="true">@OperationName(item.OperationId)</a></td><td><span class="status @(item.Success ? "ok" : "fail")">@(item.StatusCode?.ToString() ?? "ERR")</span></td><td>@item.DurationMs</td></tr>
                 }
             </tbody></table>
+            <ShowMore VisibleCount="@_items.Count" TotalCount="@_totalCount" HasMore="@_hasMore" Loading="@_loadingMore" OnMore="LoadMoreAsync" />
         }
+        @if (_listError is not null) { <p class="error-text" role="alert">@_listError</p> }
     </section>
 
     @if (_items.Count > 0 || _missing)
@@ -44,12 +46,9 @@
             {
                 @if (_result?.Codes is not null)
                 {
-                    @if (_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId && _result.Codes.Items.Count > 50)
-                    {
-                        <p class="muted">Показаны первые 50 из @_result.Codes.Items.Count результатов. Полный ответ доступен в техническом виде.</p>
-                    }
-                    <CodeInfoResultView Results="@(_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId ? new CodeInfoResults(_result.Codes.Items.Take(50).ToArray()) : _result.Codes)" OnCodeSelected="RequestRelatedCode" OnGtinSelected="RequestGtin" OnDocumentSelected="RequestDocument" ShowOwnCodeAction="@(_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId)" />
+                    <CodeInfoResultView Results="@_result.Codes" OnCodeSelected="RequestRelatedCode" OnGtinSelected="RequestGtin" OnDocumentSelected="RequestDocument" OnPermitSelected="RequestPermit" ShowOwnCodeAction="@(_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId)" />
                 }
+                else if (_result?.AggregationTree is not null) { <AggregationTreeResultView Result="_result.AggregationTree" /> }
                 else if (_result?.Product is not null) { <NationalCatalogProductResultView Result="_result.Product" /> }
                 else if (_result?.Documents is not null) { <DocumentStatusResultView Results="_result.Documents" /> }
                 else if (_result?.SuzDocuments is not null) { <SuzDocumentStatusResultView Results="_result.SuzDocuments" /> }
@@ -58,10 +57,9 @@
                 else if (_result?.Fields.Count > 0)
                 {
                     <div class="result-grid">
-                        @foreach (var field in _result.Fields)
-                        {
+                        <IncrementalList Items="@_result.Fields" ResetKey="@_selected.Id" Context="field">
                             <article class="result-field"><span>@field.Label</span><strong>@field.Value</strong></article>
-                        }
+                        </IncrementalList>
                     </div>
                 }
                 else { <div class="notice error" role="alert">@_result?.Notice</div> }
@@ -72,11 +70,10 @@
                 @if (!string.IsNullOrEmpty(_selected.Error)) { <div class="notice error">@_selected.Error</div> }
                 @if (ReadExchanges(_selected).Count > 0)
                 {
-                    @foreach (var exchange in ReadExchanges(_selected))
-                    {
+                    <IncrementalList Items="@ReadExchanges(_selected)" ResetKey="@_selected.Id" Context="exchange">
                         <details class="exchange-section" open><summary>@exchange.HttpMethod @exchange.RequestUrl — HTTP @exchange.StatusCode</summary>
                         <div class="exchange-content"><h3>Request</h3><pre>@exchange.RequestHeaders</pre>@if (!string.IsNullOrWhiteSpace(exchange.RequestBody)) { <pre>@exchange.RequestBody</pre> }<h3>Response</h3><pre>@exchange.ResponseHeaders</pre><pre>@exchange.ResponseBody</pre></div></details>
-                    }
+                    </IncrementalList>
                 }
                 else
                 {
@@ -99,6 +96,11 @@
     private bool _missing;
     private int _loadVersion;
     private int _selectionVersion;
+    private RecordPageCursor? _cursor;
+    private long? _totalCount;
+    private string? _listError;
+    private bool _hasMore;
+    private bool _loadingMore;
 
     protected override async Task OnInitializedAsync()
     {
@@ -113,12 +115,57 @@
         var version = ++_loadVersion;
         var profileId = Workbench.ProfileId;
         _items = [];
+        _hasMore = false;
+        _loadingMore = false;
+        _cursor = null;
+        _totalCount = null;
+        _listError = null;
         SetSelected(null, false);
         StateHasChanged();
-        var items = profileId is Guid id ? await HistoryService.ListAsync(id) : [];
+        try
+        {
+            if (profileId is Guid id)
+            {
+                var page = await HistoryService.ListPageAsync(id);
+                if (version != _loadVersion || profileId != Workbench.ProfileId) return;
+                _items = page.Items;
+                _cursor = page.NextCursor;
+                _totalCount = page.TotalCount;
+                _hasMore = _cursor is not null;
+            }
+        }
+        catch (Exception)
+        {
+            if (version == _loadVersion && profileId == Workbench.ProfileId)
+                _listError = "Не удалось загрузить историю. Нажмите «Обновить», чтобы повторить.";
+        }
         if (version != _loadVersion || profileId != Workbench.ProfileId) return;
-        _items = items;
         await SelectFromUrlAsync();
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        if (_loadingMore || !_hasMore || Workbench.ProfileId is not Guid profileId) return;
+        var version = _loadVersion;
+        _loadingMore = true;
+        _listError = null;
+        try
+        {
+            var page = await HistoryService.ListPageAsync(profileId, _cursor);
+            if (version != _loadVersion || profileId != Workbench.ProfileId) return;
+            _items = _items.Concat(page.Items).DistinctBy(item => item.Id).ToArray();
+            _cursor = page.NextCursor;
+            _hasMore = _cursor is not null;
+        }
+        catch (Exception)
+        {
+            if (version == _loadVersion && profileId == Workbench.ProfileId)
+                _listError = "Не удалось загрузить следующие записи. Повторите загрузку.";
+        }
+        finally
+        {
+            if (version == _loadVersion) _loadingMore = false;
+        }
     }
 
     private async Task SelectFromUrlAsync()
@@ -158,6 +205,8 @@
         QueryHelpers.AddQueryString(OperationNavigation.DocumentUrl(selection), "returnTo", SelectedReturnUrl()));
     private void RequestGtin(string gtin) => Navigation.NavigateTo(QueryHelpers.AddQueryString("/console",
         new Dictionary<string, string?> { ["gtin"] = gtin, ["returnTo"] = SelectedReturnUrl() }));
+    private void RequestPermit(string number) => Navigation.NavigateTo(QueryHelpers.AddQueryString("/console",
+        new Dictionary<string, string?> { ["permit"] = number, ["returnTo"] = SelectedReturnUrl() }));
     private string SelectedReturnUrl() => Navigation.ToAbsoluteUri($"/history?id={_selected!.Id}").ToString();
     private void OnRowKeyDown(KeyboardEventArgs args, Guid id)
     {

@@ -15,7 +15,8 @@ public partial class CodeCorrection
     private bool IsFavoriteGroup => _favoriteGroupCodes.Contains(_group);
     private IEnumerable<CorrectionProductGroup> VisibleGroups => CodeCorrectionRules.Groups.Where(x => !_favoriteGroupsOnly || _favoriteGroupCodes.Contains(x.Code));
     private string _group = "milk", _kind = "productionDate", _value = "";
-    private int _operation, _page, _contextVersion, _loadVersion;
+    private int _operation, _contextVersion, _loadVersion;
+    private int _visibleCodes = 100;
     private bool _busy, _disposed, _loadingDocuments, _checkBeforeSending = true;
     private string? _message;
     private string _busyLabel = "";
@@ -24,6 +25,8 @@ public partial class CodeCorrection
     private Dictionary<string, CorrectionCodeRow> _rows = new(StringComparer.Ordinal);
     private IReadOnlyList<string> _errors = [], _serverChecks = [];
     private IReadOnlyList<PackageDocument> _documents = [];
+    private RecordPageCursor? _documentCursor;
+    private long? _documentTotal;
     private readonly List<DocumentInput> _documentsInput = [new()];
     private readonly List<ExpirationInput> _expirationInput = [new()];
     private CorrectionCheckProgress? _progress;
@@ -132,10 +135,10 @@ public partial class CodeCorrection
     private void RemoveDocument(DocumentInput row) { _documentsInput.Remove(row); Invalidate(); }
     private void AddExpiration() { _expirationInput.Add(new() { Index = _expirationInput.Max(x => x.Index) + 1 }); Invalidate(); }
     private void RemoveExpiration(ExpirationInput row) { _expirationInput.Remove(row); Invalidate(); }
-    [JSInvokable] public Task TextChanged() => InvokeAsync(() => { _codes.Clear(); _page = 0; Invalidate(); StateHasChanged(); });
+    [JSInvokable] public Task TextChanged() => InvokeAsync(() => { _codes.Clear(); _visibleCodes = 100; Invalidate(); StateHasChanged(); });
     private void ProfileChanged(object? sender, Guid? id) => _ = InvokeAsync(async () =>
     {
-        _contextVersion++; Cancel(); _codes.Clear(); Invalidate(); _documents = [];
+        _contextVersion++; ++_loadVersion; _loadingDocuments = false; Cancel(); _codes.Clear(); Invalidate(); _documents = []; _documentCursor = null; _documentTotal = null;
         await LoadFavoriteGroupsAsync();
         if (_module is not null) await _module.InvokeVoidAsync("setText", "correction-text", "");
         await LoadAsync(); if (!_disposed) StateHasChanged();
@@ -144,7 +147,7 @@ public partial class CodeCorrection
     {
         Invalidate();
         var parsed = CodeCorrectionService.ParseCodes(text);
-        _codes = parsed.Codes.ToList(); _page = 0;
+        _codes = parsed.Codes.ToList(); _visibleCodes = 100;
         _message = $"Загружено кодов: {_codes.Count}. Исключено повторов: {parsed.DuplicateCount}.";
         _errors = Corrections.Validate(Request());
     }
@@ -202,15 +205,17 @@ public partial class CodeCorrection
     }
     private async Task SyncRetainedAsync()
     {
-        _page = Math.Min(_page, Math.Max(0, (_codes.Count - 1) / 100));
+        _visibleCodes = Math.Max(100, Math.Min(_visibleCodes, _codes.Count));
         if (_module is not null) await _module.InvokeVoidAsync("setText", "correction-text", string.Join('\n', _codes));
         _errors = Corrections.Validate(Request()); _message = "Список обновлён. Результаты проверки оставшихся кодов сохранены.";
     }
     private Task SubmitAsync() => RunAsync("Подписываем и отправляем…", async (version, token) =>
     {
         if (Workbench.ProfileId is not { } id || !CanSend) return;
+        ++_loadVersion; _loadingDocuments = false; _documents = []; _documentCursor = null; _documentTotal = null;
         var document = await Corrections.SubmitAsync(id, Request(), _checkBeforeSending, _checkId, token);
         if (!Current(version)) return;
+        _documents = []; _documentCursor = null; _documentTotal = null;
         _codes.Clear(); Invalidate();
         if (_module is not null) await _module.InvokeVoidAsync("setText", "correction-text", "");
         _message = document.DocumentId is not null ? "Документ отправлен. Статус обновляется автоматически." : "Проверьте результат в списке документов. Не повторяйте отправку при неизвестном результате.";
@@ -240,14 +245,41 @@ public partial class CodeCorrection
         catch (Exception) { if (Current(version)) _message = "Не удалось завершить операцию. Проверьте введённые данные и список документов перед повторной отправкой."; }
         finally { _operationCancellation = null; _busy = false; _progress = null; if (!_disposed) await LoadAsync(); }
     }
-    private async Task LoadAsync()
+    private Task LoadAsync() => LoadDocumentsAsync(false);
+    private Task RefreshDocumentsAsync()
     {
+        ++_loadVersion;
+        _loadingDocuments = false;
+        _documents = []; _documentCursor = null; _documentTotal = null;
+        return LoadAsync();
+    }
+    private Task LoadMoreDocumentsAsync() => LoadDocumentsAsync(true);
+    private async Task LoadDocumentsAsync(bool append)
+    {
+        if (_loadingDocuments || (append && _documentCursor is null)) return;
         var load = ++_loadVersion; var context = _contextVersion; var profile = Workbench.ProfileId;
         _loadingDocuments = true;
         try
         {
-            var documents = profile is { } id ? await Corrections.ListAsync(id, _lifetime.Token) : [];
-            if (Current(context) && load == _loadVersion) _documents = documents;
+            if (profile is not { } id) { _documents = []; _documentCursor = null; _documentTotal = null; return; }
+            if (!append && _documents.Count > 0)
+            {
+                var refreshed = await Corrections.GetManyAsync(id, _documents.Select(x => x.Id).ToArray(), _lifetime.Token);
+                if (Current(context) && load == _loadVersion)
+                {
+                    if (_documentTotal is { } total) _documentTotal = Math.Max(refreshed.Count, total - (_documents.Count - refreshed.Count));
+                    _documents = refreshed;
+                }
+            }
+            else
+            {
+                var page = await Corrections.ListPageAsync(id, append ? _documentCursor : null, _lifetime.Token);
+                if (Current(context) && load == _loadVersion)
+                {
+                    _documents = append ? _documents.Concat(page.Items).DistinctBy(x => x.Id).ToArray() : page.Items;
+                    _documentCursor = page.NextCursor; _documentTotal = page.TotalCount;
+                }
+            }
         }
         catch (OperationCanceledException) when (_disposed) { }
         catch (Exception) { if (Current(context) && load == _loadVersion) _message = "Не удалось обновить документы. Повторите обновление."; }

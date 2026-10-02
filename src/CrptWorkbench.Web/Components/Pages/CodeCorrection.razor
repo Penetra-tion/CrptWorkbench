@@ -92,28 +92,28 @@
     @if (!_checkBeforeSending) { <p class="notice">Без предварительной проверки статуса и товарной группы кодов.</p> }
     <p class="muted">Права участника, сведения реестров и дополнительные условия проверяет Честный ЗНАК. Предварительная проверка не гарантирует принятие документа.</p>
     @if (_message is not null) { <p class="notice" role="status">@_message</p> }
-    @if (_errors.Count > 0) { <div class="notice error" role="alert">@foreach (var error in _errors) { <p>@error</p> }</div> }
+    @if (_errors.Count > 0) { <div class="notice error" role="alert"><IncrementalList Items="_errors" ResetKey="_errors" Context="error"><p>@error</p></IncrementalList></div> }
     @if (_busy) { <div class="actions" role="status"><span>@_busyLabel @if (_progress is not null) { <span>@_progress.Checked / @_progress.Total</span> }</span><button class="button ghost" @onclick="Cancel">Отменить</button></div> }
     @if (_codes.Count > 0)
     {
         <div class="panel-title"><h3>Кодов: @_codes.Count</h3>@if (_rows.Values.Any(x => !x.Passed)) { <button class="button ghost" disabled="@_busy" @onclick="RemoveFailedAsync">Удалить все неподходящие</button> }</div>
         <div class="table-wrap"><table><thead><tr><th>Код</th><th>Статус</th><th>Товарная группа</th><th>Результат проверки</th><th></th></tr></thead><tbody>
-        @foreach (var code in _codes.Skip(_page * 100).Take(100))
+        @foreach (var code in _codes.Take(_visibleCodes))
         {
             var row = _rows.GetValueOrDefault(code);
-            <tr @key="code"><td><code>@(code)</code></td><td>@CodeInfoResults.StatusLabel(row?.Status)</td><td>@GroupName(row?.ProductGroup)</td><td>@if (row is null) { <span class="muted">Не проверен</span> } else if (row.Passed) { <span>Подходит</span> } else { @foreach (var reason in row.Reasons) { <div class="error-text">@reason</div> } }</td><td><button class="button ghost" disabled="@_busy" @onclick="() => RemoveAsync(code)" aria-label="Удалить код из списка">Удалить</button></td></tr>
+            <tr @key="code"><td><code>@(code)</code></td><td>@CodeInfoResults.StatusLabel(row?.Status)</td><td>@GroupName(row?.ProductGroup)</td><td>@if (row is null) { <span class="muted">Не проверен</span> } else if (row.Passed) { <span>Подходит</span> } else { <IncrementalList Items="row.Reasons" ResetKey="row" Context="reason"><div class="error-text">@reason</div></IncrementalList> }</td><td><button class="button ghost" disabled="@_busy" @onclick="() => RemoveAsync(code)" aria-label="Удалить код из списка">Удалить</button></td></tr>
         }
         </tbody></table></div>
-        @if (_codes.Count > 100) { <div class="actions"><button class="button ghost" disabled="@(_page == 0 || _busy)" @onclick="() => _page--">Назад</button><span>Страница @(_page + 1) / @((_codes.Count + 99) / 100)</span><button class="button ghost" disabled="@((_page + 1) * 100 >= _codes.Count || _busy)" @onclick="() => _page++">Далее</button></div> }
+        <ShowMore VisibleCount="Math.Min(_visibleCodes, _codes.Count)" TotalCount="_codes.Count" HasMore="@(_visibleCodes < _codes.Count)" Disabled="_busy" OnMore="() => _visibleCodes += 100" />
     }
-    @if (_serverChecks.Count > 0) { <details><summary>Дополнительно проверит Честный ЗНАК</summary><ul>@foreach (var item in _serverChecks) { <li>@item</li> }</ul></details> }
+    @if (_serverChecks.Count > 0) { <details><summary>Дополнительно проверит Честный ЗНАК</summary><IncrementalList Items="_serverChecks" ResetKey="_serverChecks" Context="item"><p>@item</p></IncrementalList></details> }
     <div class="actions submit-actions">
         @if (_checkBeforeSending && !CanSend) { <button class="button primary" disabled="@(_busy || _codes.Count == 0 || Workbench.ProfileId is null)" @onclick="CheckAsync">Проверить</button> }
         else { <button class="button primary" disabled="@(_busy || !CanSend)" @onclick="SubmitAsync">Подписать и отправить</button> }
     </div>
 </section>
 <section class="panel">
-    <div class="panel-title"><h2>Отправленные документы</h2><button class="button ghost" disabled="@(_busy || _loadingDocuments)" @onclick="LoadAsync">Обновить</button></div>
+    <div class="panel-title"><h2>Отправленные документы</h2><button class="button ghost" disabled="@(_busy || _loadingDocuments)" @onclick="RefreshDocumentsAsync">Обновить</button></div>
     @if (Workbench.ProfileId is null) { <p class="muted">Выберите профиль.</p> }
     else if (_loadingDocuments && _documents.Count == 0) { <p role="status">Загружаем документы…</p> }
     else if (_documents.Count == 0) { <p class="muted">Документов пока нет.</p> }
@@ -125,6 +125,7 @@
             <tr><td>@KindName(doc.Action)<br /><small>@doc.ItemCount кодов · @GroupName(doc.ProductGroup) · @(doc.Mode == CrptIntegrationMode.Production ? "PRODUCTION" : "MOCK")</small></td><td><code>@(doc.DocumentId ?? "—")</code></td><td>@StateLabel(doc)@if (doc.RemoteStatus is not null) { <br /><small>@DocumentStatusResults.Status(doc.RemoteStatus)</small> }@if (!string.IsNullOrWhiteSpace(doc.Error)) { <div class="error-text">@doc.Error</div> }</td><td>@Date(doc.SubmittedAtUnixMs ?? doc.CreatedAtUnixMs)</td><td>@Date(doc.LastCheckedAtUnixMs)<br /><small>Следующая: @Date(doc.NextCheckAtUnixMs)</small></td><td>@if (doc.DocumentId is not null && doc.State is "Paused" or "Tracking") { <button class="button ghost" disabled="@_busy" @onclick="() => ContinueAsync(doc)">@(doc.State == "Paused" ? "Возобновить" : "Проверить сейчас")</button> }</td></tr>
         }
         </tbody></table></div>
+        <ShowMore VisibleCount="_documents.Count" TotalCount="_documentTotal" HasMore="@(_documentCursor is not null)" Loading="_loadingDocuments" Disabled="_busy" OnMore="LoadMoreDocumentsAsync" />
     }
 </section>
 </div>

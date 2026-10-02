@@ -5,10 +5,9 @@
 {
     <p class="muted" role="status">СУЗ не вернула квитанций для этого GUID. Проверьте идентификатор или повторите запрос позже.</p>
 }
-@foreach (var receipt in Results.Results)
-{
-    var appearance = ResultStatusAppearance.ForSuzDocument(receipt);
-    var errors = SuzDocumentStatusResults.ErrorTexts(receipt);
+<IncrementalList Items="@Results.Results" Context="receipt" ResetKey="@Results.Results"><ChildContent>
+    @{ var appearance = ResultStatusAppearance.ForSuzDocument(receipt);
+    var errors = SuzDocumentStatusResults.ErrorTexts(receipt); }
     <article class="document-status-item suz-receipt">
         <div class="document-status-banner @appearance.CssClass" role="status">
             <span class="outcome-icon" aria-hidden="true">@appearance.Icon</span>
@@ -30,7 +29,7 @@
         {
             <details class="suz-disclosure result-errors tone-error">
                 <summary class="disclosure-toggle">Ошибки (@errors.Count)</summary>
-                <div class="disclosure-content"><ul>@foreach (var error in errors) { <li>@error</li> }</ul></div>
+                <div class="disclosure-content"><ul><IncrementalList Items="@errors" Context="error" ResetKey="@receipt"><ChildContent> <li>@error</li> </ChildContent><ControlsContent Context="controls"><li>@controls</li></ControlsContent></IncrementalList></ul></div>
             </details>
         }
         @if (HasDetails(receipt.Details))
@@ -45,8 +44,7 @@
             <details class="suz-disclosure">
                 <summary class="disclosure-toggle">Этапы обработки (@receipt.Operations.Count)</summary>
                 <div class="disclosure-content suz-events">
-                    @foreach (var operation in receipt.Operations)
-                    {
+                    <IncrementalList Items="@receipt.Operations" Context="operation" ResetKey="@receipt.Operations"><ChildContent>
                         <article class="suz-event">
                             <h3>@SuzDocumentStatusResults.Operation(operation.OperationType)</h3>
                             <div class="result-grid">
@@ -73,15 +71,16 @@
                                 </details>
                             }
                         </article>
-                    }
+                    </ChildContent></IncrementalList>
                 </div>
             </details>
         }
     </article>
-}
+</ChildContent></IncrementalList>
 
 @code {
     [Parameter, EditorRequired] public SuzDocumentStatusResults Results { get; set; } = null!;
 
     private static bool HasDetails(JsonElement? value) => value is { ValueKind: not JsonValueKind.Null and not JsonValueKind.Undefined };
 }
+

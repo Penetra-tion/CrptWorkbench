@@ -137,13 +137,13 @@ public sealed class LoggingHandler(
         };
         var packageCreation = endpoint == "/api/v3/true-api/lk/documents/create";
         logger.LogInformation("Outgoing {Method} {Endpoint}", request.Method.Method, endpoint);
-        if (FullLoggingEnabled())
+        if (HttpDetailsEnabled())
         {
             logger.LogInformation(
                 "Full outgoing request {RequestUri} headers {RequestHeaders} body {RequestBody}",
-                request.RequestUri?.ToString(),
+                endpoint,
                 FormatHeaders(packageCreation, request.Headers, request.Content?.Headers),
-                packageCreation ? "<signed document omitted>" : await ReadContentAsync(request.Content));
+                packageCreation ? "<signed document omitted>" : "<body omitted>");
         }
 
         HttpResponseMessage response;
@@ -156,20 +156,21 @@ public sealed class LoggingHandler(
         }
         logger.LogInformation("Outgoing request completed with {StatusCode} in {ElapsedMs} ms", (int)response.StatusCode,
             Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
-        if (FullLoggingEnabled())
+        if (HttpDetailsEnabled())
         {
             logger.LogInformation(
                 "Full outgoing response {StatusCode} headers {ResponseHeaders} body {ResponseBody}",
                 (int)response.StatusCode,
                 FormatHeaders(packageCreation, response.Headers, response.Content.Headers),
-                await ReadContentAsync(response.Content));
+                "<body omitted>");
         }
 
         return response;
     }
 
-    private bool FullLoggingEnabled() =>
-        configuration.GetValue<bool>("Serilog:FullLoggingEnabled");
+    private bool HttpDetailsEnabled() =>
+        configuration.GetValue("WorkbenchLogging:HttpEnabled", true) &&
+        configuration.GetValue("WorkbenchLogging:HttpDetailsEnabled", false);
 
     private static async Task<string?> ReadContentAsync(HttpContent? content)
     {
@@ -198,7 +199,6 @@ public sealed class LoggingHandler(
 
     private static string FormatHeaderValue(KeyValuePair<string, IEnumerable<string>> header, bool maskPackageSecrets)
     {
-        if (!maskPackageSecrets) return string.Join(", ", header.Value);
         // Only known protocol metadata is safe in signed-creation diagnostics. Unknown
         // request/response headers may carry vendor tokens, cookies or credentials.
         if (header.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase) ||

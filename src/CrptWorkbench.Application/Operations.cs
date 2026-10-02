@@ -18,7 +18,10 @@ public sealed record ApiOperationDescriptor(
     Type? ResponseType,
     IReadOnlyList<ApiFieldDescriptor> Fields);
 
-public sealed record ApiOperationContext(CrptProfile Profile, string CorrelationId);
+public sealed record ApiOperationContext(CrptProfile Profile, string CorrelationId)
+{
+    public IProgress<ApiOperationProgress>? Progress { get; init; }
+}
 
 public sealed record ApiError(string Message, string? Code = null, string? Details = null);
 
@@ -140,7 +143,8 @@ public sealed class ExecuteApiOperationService(
     IApiOperationRegistry registry,
     IProfileRepository profiles,
     IApiRequestLogRepository history,
-    ISensitiveDataMasker masker, ILogger<ExecuteApiOperationService>? logger = null)
+    ISensitiveDataMasker masker, ILogger<ExecuteApiOperationService>? logger = null,
+    CrptIntegrationOptions? options = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -148,7 +152,8 @@ public sealed class ExecuteApiOperationService(
         string operationId,
         IReadOnlyDictionary<string, string> values,
         Guid profileId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<ApiOperationProgress>? progress = null)
     {
         if (operationId.Equals(SuzDocumentStatusHandler.OperationId, StringComparison.OrdinalIgnoreCase))
             InputValidation.Operation(SuzDocumentStatusHandler.OperationId, values).ThrowIfInvalid();
@@ -166,7 +171,8 @@ public sealed class ExecuteApiOperationService(
         try
         {
             InputValidation.Operation(handler.Descriptor.Id, values).ThrowIfInvalid();
-            var exchange = await handler.ExecuteAsync(values, new(profile, correlationId), cancellationToken);
+            var exchange = await handler.ExecuteAsync(values, new(profile, correlationId) { Progress = progress }, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             var requestHeaders = masker.MaskHeaders(Serialize(exchange.RequestHeaders)) ?? "{}";
             var responseHeaders = masker.MaskHeaders(Serialize(exchange.ResponseHeaders)) ?? "{}";
             var exchanges = (exchange.Exchanges ?? [exchange]).Select(ToApiExchange).ToArray();
@@ -239,8 +245,12 @@ public sealed class ExecuteApiOperationService(
         masker.MaskHeaders(Serialize(exchange.ResponseHeaders)) ?? "{}",
         masker.MaskBody(exchange.ResponseBody));
 
-    private static ApiError MapHttpError(int statusCode, ApiSystem system)
+    private ApiError MapHttpError(int statusCode, ApiSystem system)
     {
+        if (statusCode == 401 && options?.Mode == CrptIntegrationMode.Production &&
+            system is ApiSystem.TrueApi or ApiSystem.Suz or ApiSystem.NationalCatalog &&
+            (system == ApiSystem.Suz ? options.SuzAuthMode : options.TrueApiAuthMode) == CrptAuthenticationMode.Manual)
+            return new("Ручной токен отклонён. Замените его в настройках профиля.", "unauthorized");
         if (system != ApiSystem.NationalCatalog)
             return system == ApiSystem.Mercury ? statusCode switch
             {

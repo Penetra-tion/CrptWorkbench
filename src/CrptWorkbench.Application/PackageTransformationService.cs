@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -89,6 +89,12 @@ public sealed class PackageTransformationService(PackageDocumentService document
             }, JsonOptions))).ToArray();
         return await documents.SubmitAsync(profile, group, PackageOperationKind.Transformation, action, null, drafts, cancellationToken);
     }
+
+    public Task<RecordPage<PackageDocument>> ListPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default) =>
+        documents.ListPageAsync(profileId, PackageOperationKind.Transformation, cursor, cancellationToken);
+
+    public Task<IReadOnlyList<PackageDocument>> GetManyAsync(Guid profileId, IReadOnlyList<Guid> ids, CancellationToken cancellationToken = default) =>
+        documents.GetManyAsync(profileId, PackageOperationKind.Transformation, ids, cancellationToken);
 
     public Task<IReadOnlyList<PackageDocument>> ListAsync(Guid profileId, CancellationToken cancellationToken = default) =>
         documents.ListAsync(profileId, PackageOperationKind.Transformation, cancellationToken);

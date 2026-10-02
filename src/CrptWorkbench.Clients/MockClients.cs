@@ -145,7 +145,7 @@ public sealed class MockTrueApiClient : ITrueApiClient
             return MockExchangeFactory.ExecuteAsync(ApiSystem.TrueApi, request, cancellationToken,
                 JsonSerializer.Serialize(events, JsonOptions), ids.Length == 0 ? 404 : 200);
         }
-        if (request.OperationId is not ("true-api.code-info" or "true-api.code-info-bulk"))
+        if (request.OperationId is not ("true-api.code-info" or "true-api.code-info-bulk" or "true-api.aggregation-tree"))
             return MockExchangeFactory.ExecuteAsync(ApiSystem.TrueApi, request, cancellationToken);
 
         var codes = JsonSerializer.Deserialize<string[]>(request.Body ?? "[]", JsonOptions) ?? [];
@@ -176,8 +176,39 @@ public sealed class MockTrueApiClient : ITrueApiClient
         };
     }
 
+    private static CodeInfoItem? CreateTreeItem(string code)
+    {
+        const string root = "000000000000000200";
+        const string boxOne = "000000000000000201";
+        const string boxTwo = "000000000000000202";
+        const string group = "046000000000000201";
+        const string set = "046000000000000202";
+        const string unitOne = "010460000000000021TREE000000001";
+        const string unitTwo = "010460000000000021TREE000000002";
+        const string unitThree = "010460000000000021TREE000000003";
+        const string unitFour = "010460000000000021TREE000000004";
+        (string Type, string? Parent, string[] Children)? relation = code switch
+        {
+            root => ("ATK", null, [boxOne, boxTwo]),
+            boxOne => ("BOX", root, [group, set]),
+            boxTwo => ("BOX", root, [unitFour]),
+            group => ("GROUP", boxOne, [unitOne, unitTwo]),
+            set => ("SET", boxOne, [unitThree]),
+            unitOne or unitTwo => ("UNIT", group, []),
+            unitThree => ("UNIT", set, []),
+            unitFour => ("UNIT", boxTwo, []),
+            _ => null
+        };
+        if (relation is not { } value) return null;
+        return new(new CisInfo { RequestedCis = code, Cis = code, GeneralPackageType = value.Type,
+            PackageType = value.Type, Status = "INTRODUCED", Parent = value.Parent, Child = value.Children,
+            ProductGroup = "milk", ProductGroupId = 8, ProductName = "Демо: многоуровневая агрегация" });
+    }
+
     private static CodeInfoItem CreateItem(string code)
     {
+        var tree = CreateTreeItem(code);
+        if (tree is not null) return tree;
         if (code is "010460000000000021CORRECT000001" or "010460000000000021CORRECT000002" or
             "010460000000000021CORRECT000003" or "010460000000000021CORRECT000004")
             return new(new CisInfo
@@ -292,7 +323,7 @@ public sealed class MockTrueApiClient : ITrueApiClient
                 new()
                 {
                     Type = "CONFORMITY_DECLARATION",
-                    Number = "RU Д-DEMO.АА00.B.00001/25",
+                    Number = "RU Д-DE.АА00.В.00001/25",
                     Date = "2025.05.20",
                     Indx = 123,
                     StatusGroup = 1

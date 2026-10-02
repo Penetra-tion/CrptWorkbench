@@ -62,7 +62,7 @@ public sealed class LoggingTests
     }
 
     [Fact]
-    public void CryptoProviderMessagesFollowFullLoggingSwitchWithoutRestart()
+    public void CryptoProviderMessagesFollowOwnSwitchWithoutRestart()
     {
         const string outerMessage = "temporary-provider-outer-message";
         const string innerMessage = "temporary-provider-inner-message";
@@ -76,13 +76,13 @@ public sealed class LoggingTests
         using (var factory = LoggerFactory.Create(builder => builder.AddSerilog(logger, dispose: false)))
         {
             var signerLogger = factory.CreateLogger<CryptoProCertificateSignatureService>();
-            configuration["Serilog:FullLoggingEnabled"] = "false";
+            configuration["WorkbenchLogging:CryptoProviderMessagesEnabled"] = "false";
             CryptoProCertificateSignatureService.LogFailure(
                 signerLogger, "DisabledStage", exception, configuration);
-            configuration["Serilog:FullLoggingEnabled"] = "true";
+            configuration["WorkbenchLogging:CryptoProviderMessagesEnabled"] = "true";
             CryptoProCertificateSignatureService.LogFailure(
                 signerLogger, "EnabledStage", exception, configuration);
-            configuration["Serilog:FullLoggingEnabled"] = "false";
+            configuration["WorkbenchLogging:CryptoProviderMessagesEnabled"] = "false";
             CryptoProCertificateSignatureService.LogFailure(
                 signerLogger, "DisabledAgainStage", exception, configuration);
         }
@@ -189,23 +189,26 @@ public sealed class LoggingTests
     }
 
     [Fact]
-    public void FullLoggingCanBeEnabledDynamicallyAndForwardsOriginalEvents()
+    public void IndependentCategoriesCanBeChangedDynamically()
     {
         const string filteredSecret = "filtered-secret-before-full-logging";
-        const string fullSecret = "visible-secret-after-full-logging";
+        const string fullSecret = "still-hidden-secret";
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         using var configuration = Configuration();
         using (var logger = WorkbenchLogging.CreateLogger(configuration, directory))
         {
-            var source = logger.ForContext("SourceContext", "CrptWorkbench.Application.FullLoggingTest");
+            var source = logger.ForContext("SourceContext", "CrptWorkbench.Application.LoggingTest");
             source.Information("Filtered {SecretValue}", filteredSecret);
-            configuration["Serilog:FullLoggingEnabled"] = "true";
+            configuration["WorkbenchLogging:ServerEnabled"] = "false";
+            source.Information("Suppressed server marker");
+            configuration["WorkbenchLogging:ServerEnabled"] = "true";
             source.Error(new InvalidOperationException(fullSecret), "Unfiltered {SecretValue}", fullSecret);
         }
 
         var server = Read(directory, "server");
         Assert.DoesNotContain(filteredSecret, server);
-        Assert.Contains(fullSecret, server);
+        Assert.DoesNotContain(fullSecret, server);
+        Assert.DoesNotContain("Suppressed server marker", server);
         Assert.Contains("InvalidOperationException", server);
     }
 
@@ -220,6 +223,27 @@ public sealed class LoggingTests
         Assert.Equal(absolute, WorkbenchLogging.ResolvePath(absolute, directory));
         Assert.Equal("/console", WorkbenchLogging.PageName("http://localhost/console?token=secret#secret"));
         Assert.Equal("other", WorkbenchLogging.PageName("http://localhost/secret"));
+    }
+
+    [Fact]
+    public void SqlCommandEventsAreOptInAndErrorsRemainSafe()
+    {
+        const string secret = "private-sql-literal";
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        using var configuration = Configuration();
+        using (var logger = WorkbenchLogging.CreateLogger(configuration, directory))
+        {
+            var sql = logger.ForContext("SourceContext", "Microsoft.EntityFrameworkCore.Database.Command");
+            sql.Information("Disabled SQL {CommandText}", $"SELECT '{secret}'");
+            sql.Error(new InvalidOperationException(secret), "Failed SQL {CommandText}", $"SELECT '{secret}'");
+            configuration["WorkbenchLogging:SqlQueriesEnabled"] = "true";
+            sql.Information("Enabled SQL {CommandText}", $"SELECT '{secret}'");
+        }
+        var server = Read(directory, "server");
+        Assert.DoesNotContain(secret, server);
+        Assert.DoesNotContain("Disabled SQL", server);
+        Assert.Contains("Database command event", server);
+        Assert.Equal(2, server.Split("Database command event").Length - 1);
     }
 }
 

@@ -132,7 +132,8 @@ public sealed class CodeInfoTests
         Assert.Null(results.Items[3].CisInfo!.ProductName);
         Assert.Null(results.Items[3].CisInfo!.Gtin);
         Assert.Equal(2, results.Items[0].CisInfo!.Expirations!.Count);
-        Assert.Single(results.Items[0].CisInfo!.CertDoc!);
+        var permit = Assert.Single(results.Items[0].CisInfo!.CertDoc!);
+        Assert.Equal(PermitNumberKind.Declaration, PermitDocumentNumbers.Parse(permit.Number).Kind);
         Assert.NotNull(results.Items[1].CisInfo!.CertDocRequirementDetails);
     }
 
@@ -210,7 +211,7 @@ public sealed class CodeInfoTests
     public void ResultReaderParsesPackageDocumentsRequirementsAndShelfLives()
     {
         const string body = """
-            [{"cisInfo":{"requestedCis":"root","generalPackageType":"BOX","packageType":"UNIT","child":["child-1"],"parent":"parent-1","certDoc":[{"type":"CONFORMITY_DECLARATION","number":"RU D-DEMO","date":"2025.05.20","wellNumber":"W-1","indx":123,"statusGroup":1}],"certDocRequirementDetails":{"notRequiredReason":"reason","isRequired":true},"expirations":[{"expirationStorageDate":"2025-06-12T00:00:00Z","storageConditionId":7,"storageConditionName":"cool"}]}}]
+            [{"cisInfo":{"requestedCis":"root","generalPackageType":"BOX","packageType":"UNIT","child":["child-1"],"parent":"parent-1","certDoc":[{"type":"CONFORMITY_DECLARATION","number":"RU D-DEMO","date":"2025.05.20","wellNumber":"W-1","indx":123,"statusGroup":1}],"licences":[{"licenceNumber":"МОС06318ВЭ","licenceDate":"2025-05-20"},{"licenceNumber":"ТВЕ12345ВЭ","licenceDate":"2024-04-10"}],"certDocRequirementDetails":{"notRequiredReason":"reason","isRequired":true},"expirations":[{"expirationStorageDate":"2025-06-12T00:00:00Z","storageConditionId":7,"storageConditionName":"cool"}]}}]
             """;
         var info = CodeInfoResults.Parse(body)!.Items.Single().CisInfo!;
         Assert.Equal("BOX", CodeInfoResults.PackageTypeCode(info));
@@ -222,6 +223,9 @@ public sealed class CodeInfoTests
         Assert.Equal("RU D-DEMO", document.Number);
         Assert.Equal("2025.05.20", document.Date);
         Assert.Equal("W-1", document.WellNumber);
+        var licences = Assert.IsAssignableFrom<IReadOnlyList<CodeInfoLicence>>(info.Licences);
+        Assert.Equal(["МОС06318ВЭ", "ТВЕ12345ВЭ"], licences.Select(x => x.LicenceNumber).ToArray());
+        Assert.Equal("2025-05-20", licences[0].LicenceDate);
         Assert.Equal(123, document.Indx);
         Assert.Equal(1, document.StatusGroup);
         Assert.True(info.CertDocRequirementDetails!.IsRequired);

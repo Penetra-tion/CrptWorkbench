@@ -186,14 +186,17 @@ public sealed class PermitDocumentTests
         Assert.All(factory.Urls, url => Assert.Equal(PermitDocumentTransport.EaeuUrl, url));
     }
 
-    [Fact]
-    public async Task EaeuOpenApiResolvesKindFromMatchedRecord()
+    [Theory]
+    [InlineData("01", "Действует")]
+    [InlineData("09", "Архивный")]
+    [InlineData("99", "Неизвестный статус (код 99)")]
+    public async Task EaeuOpenApiResolvesKindFromMatchedRecord(string statusCode, string expectedStatus)
     {
         const string number = "ТС № KG417/028.Д.0000000";
         var body = """
             {"result":[{"docId":"ТС № KG417/028.Д.0000000","unifiedCountryCode":{"value":"KG"},"conformityDocKindName":"декларация о соответствии ТР ЕАЭС","docStartDate":{"$date":"2025-01-01T00:00:00Z"},"docValidityDate":{"$date":"2028-01-01T00:00:00Z"},"docStatusDetails":{"docStatusCode":"01"},"applicantDetails":{"businessEntityName":"Заявитель"},"technicalRegulationObjectDetails":{"productDetails":[{"productName":"Товар"}],"manufacturerDetails":[{"businessEntityName":"Завод"}]},"technicalRegulationId":["ТР ТС 001/2011"],"privateData":"discard"},{"docId":"ТС № KG417/028.Д.0000001","conformityDocKindName":"сертификат соответствия"}],"matchedDocuments":2,"responseSize":2}
             """;
-        var factory = new FakeFactory(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") });
+        var factory = new FakeFactory(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body.Replace("\"docStatusCode\":\"01\"", $"\"docStatusCode\":\"{statusCode}\"", StringComparison.Ordinal), Encoding.UTF8, "application/json") });
         var response = await new RealPermitDocumentClient(factory).ExecuteAsync(Request(number), Ct);
         Assert.Equal(200, response.StatusCode);
         var result = Assert.IsType<PermitDocumentResult>(PermitDocumentResult.Parse(response.ResponseBody));
@@ -201,6 +204,7 @@ public sealed class PermitDocumentTests
         var item = Assert.Single(result.Items);
         Assert.Equal("Декларация о соответствии", item.Type);
         Assert.Equal("KG", item.Country);
+        Assert.Equal(expectedStatus, item.Status);
         Assert.Equal("Товар", item.Product);
         Assert.DoesNotContain("discard", response.ResponseBody);
         Assert.Equal(PermitDocumentTransport.EaeuUrl, Assert.Single(factory.Urls));

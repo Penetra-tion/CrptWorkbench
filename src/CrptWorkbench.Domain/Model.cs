@@ -21,6 +21,12 @@ public enum CrptIntegrationMode
     Production
 }
 
+public enum CrptAuthenticationMode
+{
+    Auto,
+    Manual
+}
+
 public enum TraceXDatabaseProvider
 {
     SqlServer,
@@ -34,6 +40,8 @@ public sealed class CrptIntegrationOptions
     public const string ProductionNationalCatalogBaseUrl = "https://апи.национальный-каталог.рф";
 
     public CrptIntegrationMode Mode { get; set; } = CrptIntegrationMode.Mock;
+    public CrptAuthenticationMode TrueApiAuthMode { get; set; } = CrptAuthenticationMode.Auto;
+    public CrptAuthenticationMode SuzAuthMode { get; set; } = CrptAuthenticationMode.Auto;
     public string TrueApiBaseUrl { get; set; } = ProductionTrueApiBaseUrl;
     public string NationalCatalogBaseUrl { get; set; } = ProductionNationalCatalogBaseUrl;
     public string CryptoProExecutablePath { get; set; } = @"C:\Program Files\Crypto Pro\CSP\csptest.exe";

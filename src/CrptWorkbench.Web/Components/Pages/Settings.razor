@@ -1,6 +1,7 @@
 @inject ILogger<Settings> Logger
 @page "/settings"
 @inject ProfileService ProfileService
+@inject ManualTokenService ManualTokensService
 @inject WorkbenchContext Workbench
 @inject IOptions<CrptIntegrationOptions> IntegrationOptions
 
@@ -14,10 +15,9 @@
 <div class="settings-grid">
     <aside class="panel profile-list">
         <span class="eyebrow">Профили</span>
-        @foreach (var item in _profiles)
-        {
+        <IncrementalList Items="@_profiles" ResetKey='@("profiles")' Context="item">
             <button type="button" class="profile-option @(_profile?.Id == item.Id ? "active" : null)" aria-current="@(_profile?.Id == item.Id ? "true" : null)" @onclick="() => SelectProfileAsync(item)"><strong>@item.Name</strong><small>@(item.Inn ?? "ИНН не указан")</small></button>
-        }
+        </IncrementalList>
     </aside>
 
     <div class="settings-content">
@@ -65,24 +65,57 @@
                 {
                     <label>Mock Base URL<input @bind="_profile.NationalCatalogProductionBaseUrl" />@FieldError(nameof(CrptProfile.NationalCatalogProductionBaseUrl))</label>
                 }
-                <small class="muted">Для запросов используется токен единой авторизации True API. Он получается автоматически по ИНН и сертификату выбранного профиля.</small>
+                @if (IntegrationOptions.Value.TrueApiAuthMode == CrptAuthenticationMode.Auto)
+                {
+                    <small class="muted">Для запросов используется токен единой авторизации True API. Он получается автоматически по ИНН и сертификату выбранного профиля.</small>
+                }
+                else
+                {
+                    <small class="muted">Для запросов используется ручной токен True API выбранного профиля.</small>
+                }
             </section>
 
             <section class="panel form-section">
                 <span class="eyebrow">True API · боевой контур</span><h2>True API</h2>
                 <label>Боевой Base URL<input value="@IntegrationOptions.Value.TrueApiBaseUrl" readonly /></label>
                 <small class="muted">Адрес задаётся конфигурацией службы и не редактируется из интерфейса.</small>
+                @if (IntegrationOptions.Value.TrueApiAuthMode == CrptAuthenticationMode.Manual)
+                {
+                    <label>Ручной токен True API <span class="secret-state">@(_trueApiTokenConfigured ? "✓ сохранён защищённо" : "не задан")</span>
+                        <input type="password" @bind="_trueApiTokenInput" autocomplete="new-password" placeholder="Вставьте новый токен" disabled="@_trueApiTokenBusy" />
+                    </label>
+                    <small class="muted">Сохранённый токен не отображается. Он также используется Национальным каталогом.</small>
+                    <div class="actions"><button type="button" class="button ghost" @onclick="() => SaveManualTokenAsync(ApiSystem.TrueApi)" disabled="@(string.IsNullOrWhiteSpace(_trueApiTokenInput) || _trueApiTokenBusy)">Сохранить токен</button>
+                        <button type="button" class="button ghost" @onclick="() => ClearManualTokenAsync(ApiSystem.TrueApi)" disabled="@(!_trueApiTokenConfigured || _trueApiTokenBusy)">Удалить токен</button></div>
+                    @if (_trueApiTokenMessage is not null) { <div class="notice @(_trueApiTokenError ? "error" : null)">@_trueApiTokenMessage</div> }
+                }
             </section>
 
             <section class="panel form-section">
                 <span class="eyebrow">СУЗ · @(IntegrationOptions.Value.Mode == CrptIntegrationMode.Production ? "боевой контур" : "mock")</span><h2>СУЗ</h2>
                 <div class="form-grid">
                     <label>OmsId<input @bind="_profile.SuzOmsId" maxlength="36" aria-describedby="suz-oms-help" />@FieldError(nameof(CrptProfile.SuzOmsId))<small id="suz-oms-help" class="muted">Идентификатор вашей СУЗ в формате GUID.</small></label>
-                    <label>ConnectionId<input @bind="_profile.SuzConnectionId" maxlength="128" aria-describedby="suz-connection-help" />@FieldError(nameof(CrptProfile.SuzConnectionId))<small id="suz-connection-help" class="muted">Отдельное подключение (устройство), зарегистрированное вами в СУЗ для Workbench.</small></label>
+                    @if (IntegrationOptions.Value.SuzAuthMode == CrptAuthenticationMode.Auto)
+                    {
+                        <label>ConnectionId<input @bind="_profile.SuzConnectionId" maxlength="128" aria-describedby="suz-connection-help" />@FieldError(nameof(CrptProfile.SuzConnectionId))<small id="suz-connection-help" class="muted">Отдельное подключение (устройство), зарегистрированное вами в СУЗ для Workbench.</small></label>
+                    }
                 </div>
                 <label>Адрес СУЗ для Production<input @bind="_profile.SuzProductionBaseUrl" placeholder="https://suzgrid.crpt.ru" aria-describedby="suz-url-help" />@FieldError(nameof(CrptProfile.SuzProductionBaseUrl))</label>
                 <small id="suz-url-help" class="muted">Пустое поле использует https://suzgrid.crpt.ru. В Production разрешён только этот HTTPS-адрес на порту 443.</small>
-                <small class="muted">Токен СУЗ получается автоматически по ИНН и сертификату выбранного профиля. Выпуск нового токена аннулирует предыдущий токен того же ConnectionId — используйте отдельное подключение.</small>
+                @if (IntegrationOptions.Value.SuzAuthMode == CrptAuthenticationMode.Auto)
+                {
+                    <small class="muted">Токен СУЗ получается автоматически по ИНН и сертификату выбранного профиля. Выпуск нового токена аннулирует предыдущий токен того же ConnectionId — используйте отдельное подключение.</small>
+                }
+                else
+                {
+                    <label>Ручной токен СУЗ <span class="secret-state">@(_suzTokenConfigured ? "✓ сохранён защищённо" : "не задан")</span>
+                        <input type="password" @bind="_suzTokenInput" autocomplete="new-password" placeholder="Вставьте новый токен" disabled="@_suzTokenBusy" />
+                    </label>
+                    <small class="muted">Сохранённый токен не отображается. OmsId нужен для запроса квитанций.</small>
+                    <div class="actions"><button type="button" class="button ghost" @onclick="() => SaveManualTokenAsync(ApiSystem.Suz)" disabled="@(string.IsNullOrWhiteSpace(_suzTokenInput) || _suzTokenBusy)">Сохранить токен</button>
+                        <button type="button" class="button ghost" @onclick="() => ClearManualTokenAsync(ApiSystem.Suz)" disabled="@(!_suzTokenConfigured || _suzTokenBusy)">Удалить токен</button></div>
+                    @if (_suzTokenMessage is not null) { <div class="notice @(_suzTokenError ? "error" : null)">@_suzTokenMessage</div> }
+                }
                 @if (IntegrationOptions.Value.Mode == CrptIntegrationMode.Mock)
                 {
                     <small class="muted">В Mock запросы выполняются полностью локально, независимо от этих настроек.</small>
@@ -135,6 +168,17 @@
     private bool _checkingTraceX;
     private string? _traceXMessage;
     private TraceXConnectionCheckResult? _traceXCheck;
+    private string _trueApiTokenInput = string.Empty;
+    private string _suzTokenInput = string.Empty;
+    private bool _trueApiTokenConfigured;
+    private bool _suzTokenConfigured;
+    private bool _trueApiTokenBusy;
+    private bool _suzTokenBusy;
+    private bool _trueApiTokenError;
+    private bool _suzTokenError;
+    private string? _trueApiTokenMessage;
+    private string? _suzTokenMessage;
+    private int _profileSelectionVersion;
 
     protected override async Task OnInitializedAsync()
     {
@@ -146,7 +190,9 @@
 
     private async Task SelectProfileAsync(CrptProfile? profile)
     {
+        var selectionVersion = ++_profileSelectionVersion;
         _profile = profile is null ? null : CopyProfile(profile);
+        ResetManualTokenUi();
         _fieldValidation = new([]);
         _validation = null;
         _saveMessage = null;
@@ -156,6 +202,11 @@
         _traceXCheck = null;
         if (profile is null) return;
         Workbench.ProfileId = profile.Id;
+        var trueApiConfigured = await ManualTokensService.IsConfiguredAsync(profile.Id, ApiSystem.TrueApi);
+        var suzConfigured = await ManualTokensService.IsConfiguredAsync(profile.Id, ApiSystem.Suz);
+        if (selectionVersion != _profileSelectionVersion) return;
+        _trueApiTokenConfigured = trueApiConfigured;
+        _suzTokenConfigured = suzConfigured;
         var traceXState = await ProfileService.GetTraceXConnectionStateAsync(profile.Id);
         _traceXConfigured = traceXState.Configured;
         _traceXProvider = traceXState.Provider;
@@ -165,7 +216,9 @@
 
     private void NewProfile()
     {
+        ++_profileSelectionVersion;
         _profile = new CrptProfile { Name = "Новый профиль" };
+        ResetManualTokenUi();
         _fieldValidation = new([]);
         _validation = null;
         _saveMessage = null;
@@ -283,6 +336,103 @@
         finally
         {
             _checkingConnection = false;
+        }
+    }
+
+    private void ResetManualTokenUi()
+    {
+        _trueApiTokenInput = string.Empty;
+        _suzTokenInput = string.Empty;
+        _trueApiTokenConfigured = false;
+        _suzTokenConfigured = false;
+        _trueApiTokenBusy = false;
+        _suzTokenBusy = false;
+        _trueApiTokenError = false;
+        _suzTokenError = false;
+        _trueApiTokenMessage = null;
+        _suzTokenMessage = null;
+    }
+
+    private async Task SaveManualTokenAsync(ApiSystem system)
+    {
+        if (_profile is null || (system == ApiSystem.TrueApi ? _trueApiTokenBusy : _suzTokenBusy)) return;
+        if (!_profiles.Any(profile => profile.Id == _profile.Id))
+        {
+            if (system == ApiSystem.TrueApi) { _trueApiTokenMessage = "Сначала сохраните профиль."; _trueApiTokenError = true; }
+            else { _suzTokenMessage = "Сначала сохраните профиль."; _suzTokenError = true; }
+            return;
+        }
+        var profileId = _profile.Id;
+        var version = _profileSelectionVersion;
+        var token = system == ApiSystem.TrueApi ? _trueApiTokenInput : _suzTokenInput;
+        if (system == ApiSystem.TrueApi) _trueApiTokenBusy = true;
+        else _suzTokenBusy = true;
+        try
+        {
+            await ManualTokensService.SaveAsync(profileId, system, token);
+            if (version != _profileSelectionVersion) return;
+            if (system == ApiSystem.TrueApi)
+            {
+                _trueApiTokenConfigured = true;
+                _trueApiTokenMessage = "Токен сохранён защищённо.";
+                _trueApiTokenError = false;
+            }
+            else
+            {
+                _suzTokenConfigured = true;
+                _suzTokenMessage = "Токен сохранён защищённо.";
+                _suzTokenError = false;
+            }
+        }
+        catch (ArgumentException exception)
+        {
+            if (version != _profileSelectionVersion) return;
+            if (system == ApiSystem.TrueApi) { _trueApiTokenMessage = exception.Message; _trueApiTokenError = true; }
+            else { _suzTokenMessage = exception.Message; _suzTokenError = true; }
+        }
+        finally
+        {
+            if (version == _profileSelectionVersion)
+            {
+                if (system == ApiSystem.TrueApi) { _trueApiTokenInput = string.Empty; _trueApiTokenBusy = false; }
+                else { _suzTokenInput = string.Empty; _suzTokenBusy = false; }
+            }
+        }
+    }
+
+    private async Task ClearManualTokenAsync(ApiSystem system)
+    {
+        if (_profile is null || (system == ApiSystem.TrueApi ? _trueApiTokenBusy : _suzTokenBusy)) return;
+        var profileId = _profile.Id;
+        var version = _profileSelectionVersion;
+        if (system == ApiSystem.TrueApi) _trueApiTokenBusy = true;
+        else _suzTokenBusy = true;
+        try
+        {
+            await ManualTokensService.ClearAsync(profileId, system);
+            if (version != _profileSelectionVersion) return;
+            if (system == ApiSystem.TrueApi)
+            {
+                _trueApiTokenConfigured = false;
+                _trueApiTokenInput = string.Empty;
+                _trueApiTokenMessage = "Токен удалён.";
+                _trueApiTokenError = false;
+            }
+            else
+            {
+                _suzTokenConfigured = false;
+                _suzTokenInput = string.Empty;
+                _suzTokenMessage = "Токен удалён.";
+                _suzTokenError = false;
+            }
+        }
+        finally
+        {
+            if (version == _profileSelectionVersion)
+            {
+                if (system == ApiSystem.TrueApi) _trueApiTokenBusy = false;
+                else _suzTokenBusy = false;
+            }
         }
     }
 

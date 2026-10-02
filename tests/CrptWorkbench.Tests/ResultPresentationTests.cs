@@ -14,11 +14,59 @@ namespace CrptWorkbench.Tests;
 public sealed class ResultPresentationTests
 {
     [Fact]
+    public async Task WaterLicencesAppearOnceBesideWellAndWithoutPermitDocuments()
+    {
+        var withWell = new CisInfo
+        {
+            RequestedCis = "water-code",
+            CertDoc = [new() { Type = "OTHER", WellNumber = "49" }],
+            Licences = [new() { LicenceNumber = "МОС06318ВЭ", LicenceDate = "2025-05-20" },
+                new() { LicenceNumber = "ТВЕ12345ВЭ", LicenceDate = "2024-04-10" }]
+        };
+        var html = await Render<CodeInfoResultView>(new CodeInfoResults([new(withWell)]));
+        Assert.Contains("Скважина: 49", html);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(html, "Лицензия: МОС06318ВЭ").Cast<System.Text.RegularExpressions.Match>());
+        Assert.Contains("Дата лицензии: 20.05.2025", html);
+        Assert.Contains("Лицензия: ТВЕ12345ВЭ", html);
+
+        html = await Render<CodeInfoResultView>(new CodeInfoResults([new(withWell with
+        {
+            CertDoc = null,
+            Licences = [new() { LicenceNumber = "МОС06318ВЭ" }, new() { LicenceDate = "2025-05-20" }, new()]
+        })]));
+        Assert.Contains("Разрешительные документы", html);
+        Assert.Contains("Лицензия: МОС06318ВЭ", html);
+        Assert.Contains("Дата лицензии: 20.05.2025", html);
+        Assert.DoesNotContain("Скважина:", html);
+    }
+
+    [Fact]
+    public async Task PermitCardLinksOnlySupportedNumbersAndOmitsStatusGroup()
+    {
+        const string number = "RU Д-DE.АА00.В.00001/25";
+        var html = await Render<CodeInfoResultView>(new CodeInfoResults([new(new CisInfo
+        {
+            RequestedCis = "code-1",
+            CertDoc = [new() { Type = "CONFORMITY_DECLARATION", Number = number, StatusGroup = 1 },
+                new() { Type = "CONFORMITY_CERTIFICATE", Number = "invalid-number", StatusGroup = 2 }]
+        })]));
+        Assert.Contains("title=\"Проверить документ в реестре\"", html);
+        Assert.Contains(number, html);
+        Assert.DoesNotContain("Проверить документ ↗", html);
+        Assert.Contains("invalid-number", html);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(html, "class=\"permit-document permit-document-link\"").Cast<System.Text.RegularExpressions.Match>());
+        Assert.DoesNotContain("Зелёный статус", html);
+        Assert.DoesNotContain("Жёлтый статус", html);
+        Assert.DoesNotContain("группа 1", html);
+    }
+
+    [Fact]
     public async Task GtinIsClickableOnlyWhenCodeProvidesAValue()
     {
         var present = await Render<CodeInfoResultView>(new CodeInfoResults(
             [new(new CisInfo { RequestedCis = "code-1", Gtin = "04600000000000" })]));
         Assert.Contains("title=\"Запросить товар в Национальном каталоге\"", present);
+        Assert.Contains("class=\"code-field-link\"", present);
         Assert.Contains("04600000000000</button>", present);
 
         var absent = await Render<CodeInfoResultView>(new CodeInfoResults(

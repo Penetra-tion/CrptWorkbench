@@ -16,24 +16,23 @@
 {
     <p class="muted">Номер: @Result.Number</p>
 }
-@foreach (var item in Result.Items)
-{
+<IncrementalList Items="@Result.Items" Context="item" ResetKey="@Result.Items"><ChildContent>
     <section class="permit-result-card" aria-label="@item.Type">
         <h3>@item.Type</h3>
-        <div class="result-grid">
+        <div class="permit-status @StatusTone(item.Status)" role="status"><span>Статус</span><strong>@(string.IsNullOrWhiteSpace(item.Status) ? "Не указан" : item.Status)</strong></div>
+        <div class="permit-fields">
             @Field("Номер", item.Number)
             @Field("Страна выдачи", item.Country)
-            @Field("Статус реестра", item.Status)
             @Field("Дата регистрации", item.RegisteredAt)
             @Field("Окончание действия", item.ExpiresAt)
-            @Field("Продукция", item.Product)
+            @Field("Продукция", item.Product, true)
             @Field("Изготовитель", item.Manufacturer)
             @Field("Заявитель / получатель", item.Applicant)
-            @Field("Технические регламенты / нормативный документ", item.TechnicalRegulations)
+            @Field("Технические регламенты / нормативный документ", item.TechnicalRegulations, true)
         </div>
         <p class="muted">Источник: <a href="@item.SourceUrl" target="_blank" rel="noopener noreferrer">@item.SourceName</a></p>
     </section>
-}
+</ChildContent></IncrementalList>
 @if (Result.State is "unavailable" or "not_found")
 {
     <a href="@Result.ManualUrl" target="_blank" rel="noopener noreferrer">Проверить в реестре вручную ↗</a>
@@ -41,12 +40,21 @@
 
 @code {
     [Parameter, EditorRequired] public PermitDocumentResult Result { get; set; } = default!;
-    private RenderFragment Field(string label, string? value) => builder =>
+    private static string StatusTone(string? status) => status switch
+    {
+        "Действует" or "Действие возобновлено" => "tone-success",
+        "Действие приостановлено" => "tone-warning",
+        "Действие прекращено" => "tone-error",
+        _ => "tone-neutral"
+    };
+
+    private RenderFragment Field(string label, string? value, bool wide = false) => builder =>
     {
         if (string.IsNullOrWhiteSpace(value)) return;
-        builder.OpenElement(0, "article"); builder.AddAttribute(1, "class", "result-field");
+        builder.OpenElement(0, "article"); builder.AddAttribute(1, "class", wide ? "permit-field permit-field-wide" : "permit-field");
         builder.OpenElement(2, "span"); builder.AddContent(3, label); builder.CloseElement();
         builder.OpenElement(4, "strong"); builder.AddContent(5, value); builder.CloseElement();
         builder.CloseElement();
     };
 }
+

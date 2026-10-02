@@ -337,7 +337,7 @@ public sealed class CryptoProCertificateSignatureService(
         Exception exception,
         IConfiguration? configuration)
     {
-        var fullLoggingEnabled = configuration?.GetValue<bool>("Serilog:FullLoggingEnabled") == true;
+        var fullLoggingEnabled = configuration?.GetValue<bool>("WorkbenchLogging:CryptoProviderMessagesEnabled") == true;
         Exception? current = exception;
         for (var depth = 0; current is not null && depth < 8; depth++)
         {

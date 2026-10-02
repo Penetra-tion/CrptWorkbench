@@ -17,10 +17,10 @@ internal static class SuzRequestRules
         uri.Host.Equals(host, StringComparison.OrdinalIgnoreCase) && uri.Port == 443 && uri.UserInfo.Length == 0 && uri.Fragment.Length == 0;
     public static bool IsConnectionId(string? value) => value is not null && Regex.IsMatch(value, "\\A[A-Za-z0-9_-]{1,128}\\z");
     public static bool IsGuid(string? value) => Guid.TryParseExact(value, "D", out var id) && id != Guid.Empty;
-    public static void ValidateConnection(SuzConnectionContext connection)
+    public static void ValidateConnection(SuzConnectionContext connection, bool requireConnectionId = true)
     {
         if (!IsGuid(connection.OmsId)) throw new InvalidOperationException("Для СУЗ укажите OmsId в формате GUID.");
-        if (!IsConnectionId(connection.ConnectionId)) throw new InvalidOperationException("Для СУЗ укажите отдельный ConnectionId: 1–128 латинских букв, цифр, дефисов или подчёркиваний.");
+        if (requireConnectionId && !IsConnectionId(connection.ConnectionId)) throw new InvalidOperationException("Для СУЗ укажите отдельный ConnectionId: 1–128 латинских букв, цифр, дефисов или подчёркиваний.");
         if (!string.IsNullOrWhiteSpace(connection.BaseUrl) && (!Uri.TryCreate(connection.BaseUrl, UriKind.Absolute, out var uri) ||
             !IsOrigin(uri, "suzgrid.crpt.ru") || uri.AbsolutePath != "/" || uri.Query.Length != 0))
             throw new InvalidOperationException("Адрес СУЗ должен быть https://suzgrid.crpt.ru:443.");
@@ -168,7 +168,7 @@ public sealed class RealSuzClient(IHttpClientFactory httpClientFactory, ISuzToke
         if (request.OperationId == "suz.order-status") return await new MockSuzClient().ExecuteAsync(request, cancellationToken);
         SuzRequestRules.ValidateOptions(options.Value);
         var connection = request.SuzConnection ?? throw new InvalidOperationException("Не указано подключение СУЗ.");
-        SuzRequestRules.ValidateConnection(connection);
+        SuzRequestRules.ValidateConnection(connection, options.Value.SuzAuthMode == CrptAuthenticationMode.Auto);
         var uri = new Uri(new Uri(SuzRequestRules.BaseUrl + "/"), request.Url);
         if (request.OperationId != "suz.document-status" || request.Method != "GET" || request.Body is not null ||
             !SuzRequestRules.IsReceipt(uri) || uri.Query.Split('&')[0] != "?omsId=" + connection.OmsId)
@@ -177,7 +177,7 @@ public sealed class RealSuzClient(IHttpClientFactory httpClientFactory, ISuzToke
         var watch = Stopwatch.StartNew();
         var token = await tokens.GetTokenAsync(auth, connection, request.CorrelationId, cancellationToken);
         var exchange = await SendAsync(uri, request, token, cancellationToken);
-        if (exchange.StatusCode == 401)
+        if (exchange.StatusCode == 401 && options.Value.SuzAuthMode == CrptAuthenticationMode.Auto)
         {
             tokens.Invalidate(auth, connection, token);
             token = await tokens.GetTokenAsync(auth, connection, request.CorrelationId, cancellationToken);

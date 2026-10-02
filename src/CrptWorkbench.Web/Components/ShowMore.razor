@@ -1,0 +1,19 @@
+@if (VisibleCount > 0 || HasMore)
+{
+    <div class="show-more-control" style="display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;margin-top:.75rem">
+        @if (HasMore)
+        {
+            <button type="button" class="button ghost" disabled="@(Loading || Disabled)" aria-busy="@(Loading ? "true" : "false")" @onclick="OnMore">@(Loading ? "Загрузка…" : $"Показать следующие {NextCount} записей")</button>
+        }
+        <span class="muted" role="status">Показано @VisibleCount@if (TotalCount.HasValue) { <text> из @TotalCount.Value</text> }</span>
+    </div>
+}
+@code {
+    [Parameter] public long VisibleCount { get; set; }
+    [Parameter] public long? TotalCount { get; set; }
+    [Parameter] public bool HasMore { get; set; }
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback OnMore { get; set; }
+    private long NextCount => TotalCount.HasValue ? Math.Min(100, Math.Max(0, TotalCount.Value - VisibleCount)) : 100;
+}

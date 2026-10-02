@@ -38,6 +38,14 @@ public sealed class ProductionReadinessService(
         if (_options.Mode == CrptIntegrationMode.Mock)
             return new(true, [.. checks, "True API работает в mock-режиме."]);
 
+        if (_options.TrueApiAuthMode == CrptAuthenticationMode.Manual)
+        {
+            foreach (var profile in await profiles.ListAsync(cancellationToken))
+                if (await profiles.HasManualTrueApiTokenAsync(profile.Id, cancellationToken))
+                    return new(true, [.. checks, $"Профиль «{profile.Name}» содержит защищённый токен True API."]);
+            return new(false, [.. checks, "Нет профиля с ручным токеном True API."]);
+        }
+
         checks.Add("CryptoPro CSP доступен через выбранный сертификат.");
 
         var profileList = await profiles.ListAsync(cancellationToken);

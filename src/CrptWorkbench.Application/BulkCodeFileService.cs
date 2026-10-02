@@ -53,8 +53,14 @@ public sealed class BulkCodeFileService(
     public Task<bool> StartReadyAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default) =>
         jobs.StartReadyAsync(profileId, id, cancellationToken);
 
+    public Task<RecordPage<BulkCodeJob>> ListPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default) =>
+        jobs.ListPageAsync(profileId, cursor, cancellationToken);
+
     public Task<IReadOnlyList<BulkCodeJob>> ListAsync(Guid profileId, CancellationToken cancellationToken = default) =>
         jobs.ListAsync(profileId, cancellationToken);
+
+    public Task<IReadOnlyList<BulkCodeJob>> GetManyAsync(Guid profileId, IReadOnlyList<Guid> ids, CancellationToken cancellationToken = default) =>
+        jobs.GetManyAsync(profileId, ids, cancellationToken);
 
     public Task<BulkCodeJob?> GetAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default) =>
         jobs.GetAsync(profileId, id, cancellationToken);
@@ -92,5 +98,37 @@ public sealed class BulkCodeFileService(
         if (job is null)
             throw new InvalidOperationException("Задание не найдено.");
         await foreach (var code in files.ReadCodesAsync(id, job.NextBatchNumber, statuses, cancellationToken)) yield return code;
+    }
+
+    public async Task<IReadOnlyDictionary<string, long>> CountCodesByStatusAsync(Guid profileId, Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var job = await jobs.GetAsync(profileId, id, cancellationToken)
+            ?? throw new InvalidOperationException("Задание не найдено.");
+        return await files.CountCodesByStatusAsync(id, job.NextBatchNumber, cancellationToken);
+    }
+
+    public async Task<FileRecordPage> PreviewPageAsync(Guid profileId, Guid id, IReadOnlySet<string> statuses,
+        FilePageCursor? cursor = null, CancellationToken cancellationToken = default)
+    {
+        var job = await jobs.GetAsync(profileId, id, cancellationToken)
+            ?? throw new InvalidOperationException("Задание не найдено.");
+        if (job.State != "Completed") throw new InvalidOperationException("Предпросмотр доступен после завершения задания.");
+        return await files.ReadPageAsync(id, job.NextBatchNumber, statuses, cursor, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<string>> PreviewAsync(Guid profileId, Guid id, IReadOnlySet<string> statuses,
+        CancellationToken cancellationToken = default)
+    {
+        var job = await jobs.GetAsync(profileId, id, cancellationToken)
+            ?? throw new InvalidOperationException("Задание не найдено.");
+        if (job.State != "Completed")
+            throw new InvalidOperationException("Предпросмотр доступен после завершения задания.");
+        var codes = new List<string>();
+        await foreach (var code in files.ReadCodesAsync(id, job.NextBatchNumber, statuses, cancellationToken))
+        {
+            codes.Add(code);
+        }
+        return codes;
     }
 }

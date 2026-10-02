@@ -5,6 +5,32 @@ namespace CrptWorkbench.Infrastructure;
 
 public sealed class BulkCodeJobRepository(IDbContextFactory<WorkbenchDbContext> factory) : IBulkCodeJobRepository
 {
+    public async Task<RecordPage<BulkCodeJob>> ListPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var query = db.BulkCodeJobs.AsNoTracking().Where(x => x.ProfileId == profileId);
+        var total = await query.LongCountAsync(cancellationToken);
+        if (cursor is not null)
+        {
+            var boundaryIds = cursor.BoundaryIds.ToArray();
+            query = query.Where(x => x.CreatedAtUnixMs < cursor.CreatedAtUnixMs ||
+                (x.CreatedAtUnixMs == cursor.CreatedAtUnixMs && !boundaryIds.Contains(x.Id)));
+        }
+        var rows = await query.OrderByDescending(x => x.CreatedAtUnixMs).ThenBy(x => x.Id)
+            .Take(RecordPage<BulkCodeJob>.Size + 1).ToListAsync(cancellationToken);
+        var more = rows.Count > RecordPage<BulkCodeJob>.Size;
+        var items = rows.Take(RecordPage<BulkCodeJob>.Size).ToArray();
+        RecordPageCursor? next = null;
+        if (more)
+        {
+            var timestamp = items[^1].CreatedAtUnixMs;
+            var ids = items.Where(x => x.CreatedAtUnixMs == timestamp).Select(x => x.Id);
+            if (cursor?.CreatedAtUnixMs == timestamp) ids = cursor.BoundaryIds.Concat(ids);
+            next = new(timestamp, ids.ToArray());
+        }
+        return new(items, next, total);
+    }
+
     public async Task AddAsync(BulkCodeJob job, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -17,6 +43,15 @@ public sealed class BulkCodeJobRepository(IDbContextFactory<WorkbenchDbContext> 
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         return await db.BulkCodeJobs.AsNoTracking().Where(x => x.ProfileId == profileId)
             .OrderByDescending(x => x.CreatedAtUnixMs).ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<BulkCodeJob>> GetManyAsync(Guid profileId, IReadOnlyList<Guid> ids, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var result = new List<BulkCodeJob>();
+        foreach (var chunk in ids.Chunk(500))
+            result.AddRange(await db.BulkCodeJobs.AsNoTracking().Where(x => x.ProfileId == profileId && chunk.Contains(x.Id)).ToListAsync(cancellationToken));
+        return result.OrderByDescending(x => x.CreatedAtUnixMs).ThenBy(x => x.Id).ToArray();
     }
 
     public async Task<BulkCodeJob?> GetAsync(Guid profileId, Guid id, CancellationToken cancellationToken)
@@ -48,7 +83,7 @@ public sealed class BulkCodeJobRepository(IDbContextFactory<WorkbenchDbContext> 
         job.NextOffset = batch.EndOffset;
         job.NextBatchNumber = batch.Number + 1;
         job.LinesRead = linesRead;
-        job.State = "Running";
+        if (job.State != "CancelRequested") job.State = "Running";
         job.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);

@@ -19,7 +19,7 @@ public sealed class TraceXImportStore : ITraceXImportStore
     }
     public string CreatePath() => Path.Combine(_directory, $"{Guid.NewGuid():N}.txt");
     public Stream OpenWrite(string path) => new FileStream(Check(path), FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, FileOptions.Asynchronous);
-    public Stream OpenRead(string path) => new FileStream(Check(path), FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous);
+    public Stream OpenRead(string path) => new FileStream(Check(path), FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 65536, FileOptions.Asynchronous);
     public void Delete(string path) { path = Check(path); if (File.Exists(path)) File.Delete(path); }
     private string Check(string path)
     {

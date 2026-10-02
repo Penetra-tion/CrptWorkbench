@@ -52,7 +52,7 @@
     private bool IsProduction => IntegrationOptions.Value.Mode == CrptIntegrationMode.Production;
     private string TrueApiHeadline => IsProduction ? "Промышленный контур." : "Локальная симуляция.";
     private string TrueApiDescription => IsProduction
-        ? "True API, Национальный каталог и статус документа СУЗ работают с промышленным контуром. Статус заказа СУЗ (Mock) остаётся локальной демонстрацией."
+        ? "Интеграции работают с промышленным контуром."
         : "Все интеграции работают в mock-режиме. Сетевые запросы в Честный Знак не выполняются.";
 
     protected override async Task OnInitializedAsync()

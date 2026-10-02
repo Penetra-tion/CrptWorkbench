@@ -1,10 +1,9 @@
 @using CrptWorkbench.Application
 
 <div class="panel-title"><div><span class="eyebrow">Документ True API</span><h2>@(Results.Items.Count == 0 ? "Документ не найден" : "Результат проверки документа")</h2></div></div>
-@foreach (var item in Results.Items)
-{
-    var appearance = ResultStatusAppearance.ForDocument(item);
-    var errors = DocumentStatusResults.ErrorTexts(item);
+<IncrementalList Items="@Results.Items" Context="item" ResetKey="@Results.Items"><ChildContent>
+    @{ var appearance = ResultStatusAppearance.ForDocument(item);
+    var errors = DocumentStatusResults.ErrorTexts(item); }
     <article class="document-status-item">
         <div class="document-status-banner @appearance.CssClass" role="status">
             <span class="outcome-icon" aria-hidden="true">@appearance.Icon</span>
@@ -20,12 +19,13 @@
         {
             <div class="result-errors tone-error">
                 <h3><span aria-hidden="true">!</span> Ошибки</h3>
-                <ul>@foreach (var error in errors) { <li>@error</li> }</ul>
+                <ul><IncrementalList Items="@errors" Context="error" ResetKey="@item"><ChildContent> <li>@error</li> </ChildContent><ControlsContent Context="controls"><li>@controls</li></ControlsContent></IncrementalList></ul>
             </div>
         }
     </article>
-}
+</ChildContent></IncrementalList>
 
 @code {
     [Parameter, EditorRequired] public DocumentStatusResults Results { get; set; } = null!;
 }
+

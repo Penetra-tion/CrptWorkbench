@@ -13,7 +13,8 @@ public sealed record SavedResultView(
     string? Notice,
     SuzDocumentStatusResults? SuzDocuments = null,
     MercuryVsdInfoResult? MercuryVsd = null,
-    PermitDocumentResult? PermitDocument = null)
+    PermitDocumentResult? PermitDocument = null,
+    AggregationTreeResult? AggregationTree = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -26,6 +27,7 @@ public sealed record SavedResultView(
         {
             return log.OperationId switch
             {
+                TrueApiAggregationTreeHandler.OperationId => FromAggregationTree(log),
                 TrueApiCodeInfoHandler.OperationId or TrueApiBulkCodeInfoHandler.OperationId => FromCodes(log),
                 "true-api.code-info-bulk-file" => FromBulkFile(log),
                 NationalCatalogProductHandler.OperationId => FromProduct(log),
@@ -47,6 +49,12 @@ public sealed record SavedResultView(
     {
         var result = CodeInfoResults.Parse(log.ResponseBody);
         return result is null ? Invalid() : new(result, null, null, [], null);
+    }
+
+    private static SavedResultView FromAggregationTree(ApiRequestLog log)
+    {
+        var result = AggregationTreeResult.Parse(log.ResponseBody);
+        return result is null ? Invalid() : new(null, null, null, [], null, AggregationTree: result);
     }
 
     private static SavedResultView FromBulkFile(ApiRequestLog log)

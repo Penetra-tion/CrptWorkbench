@@ -244,7 +244,7 @@ public sealed class RealPermitDocumentClient(IHttpClientFactory clients) : IPerm
                 var manufacturers = ArrayNames(detail, "manufacturerDetails", "businessEntityName");
                 var regulations = ArrayStrings(row, "technicalRegulationId");
                 items.Add(new PermitDocumentItem(type, actual, country,
-                    statusCode is null ? null : $"Код статуса {statusCode} (сверьте в реестре)",
+                    EaeuStatus(statusCode),
                     Date(row, "docStartDate"), Date(row, "docValidityDate"), products,
                     manufacturers, Nested(row, "applicantDetails", "businessEntityName"), regulations,
                     "Единый реестр сертификатов и деклараций ЕАЭС", manual));
@@ -263,6 +263,17 @@ public sealed class RealPermitDocumentClient(IHttpClientFactory clients) : IPerm
     private static string? Nested(JsonElement row, string parent, string child) =>
         row.ValueKind == JsonValueKind.Object && row.TryGetProperty(parent, out var value) && value.ValueKind == JsonValueKind.Object
             ? Text(value, child) : null;
+
+    private static string? EaeuStatus(string? code) => code switch
+    {
+        null => null,
+        "01" => "Действует",
+        "02" => "Действие приостановлено",
+        "03" => "Действие прекращено",
+        "05" => "Действие возобновлено",
+        "09" => "Архивный",
+        _ => $"Неизвестный статус (код {code})"
+    };
 
     private static string? Date(JsonElement row, string name)
     {

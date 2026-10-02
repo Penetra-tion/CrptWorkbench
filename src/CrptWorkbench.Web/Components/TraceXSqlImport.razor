@@ -21,23 +21,24 @@
             <textarea id="@_inputId" rows="5" @bind="_query" disabled="@_loading" spellcheck="false" placeholder="SELECT code FROM ..."></textarea>
             <p class="muted">@(Columns == 2 ? "Первый столбец — код вложения, второй — код упаковки." : "Первый столбец — код маркировки.") Используйте учётную запись базы с правами только на чтение.</p>
             <div class="actions">
-                <button type="button" class="button ghost" @onclick="LoadAsync" disabled="@_loading">@(_loading ? "Загружается…" : "Загрузить")</button>
-                <button type="button" class="button ghost" @onclick="Close" disabled="@_loading">Закрыть</button>
+                <button type="button" class="button ghost" @onclick="LoadAsync" disabled="@(_loading || _previewLoading)">@(_loading ? "Загружается…" : "Загрузить")</button>
+                <button type="button" class="button ghost" @onclick="CloseAsync" disabled="@(_loading || _previewLoading)">Закрыть</button>
             </div>
             @if (_error is not null) { <p class="error-text" role="alert">@_error</p> }
             @if (_result is not null)
             {
                 <p role="status">Загружено строк: @_result.Rows.</p>
-                <pre class="tracex-sql-preview">@string.Join('\n', _result.Preview)</pre>
+                <pre class="tracex-sql-preview">@string.Join('\n', _preview)</pre>
+                <ShowMore VisibleCount="@_preview.Count" TotalCount="@_result.Rows" HasMore="@(_preview.Count < _result.Rows)" Loading="@_previewLoading" Disabled="@_loading" OnMore="LoadPreviewAsync" />
                 @if (_result.Bytes <= MaxBytes)
                 {
                     <div class="actions">
-                        <button type="button" class="button primary" @onclick="() => ApplyAsync(false)" disabled="@_loading">Заменить</button>
-                        <button type="button" class="button ghost" @onclick="() => ApplyAsync(true)" disabled="@_loading">Добавить</button>
+                        <button type="button" class="button primary" @onclick="() => ApplyAsync(false)" disabled="@(_loading || _previewLoading)">Заменить</button>
+                        <button type="button" class="button ghost" @onclick="() => ApplyAsync(true)" disabled="@(_loading || _previewLoading)">Добавить</button>
                     </div>
                 }
                 else if (!Bulk) { <p class="error-text">Результат слишком велик для этой формы.</p> }
-                @if (Bulk) { <button type="button" class="button ghost" @onclick="PrepareAsync" disabled="@_loading">Подготовить фоновое задание</button> }
+                @if (Bulk) { <button type="button" class="button ghost" @onclick="PrepareAsync" disabled="@(_loading || _previewLoading)">Подготовить фоновое задание</button> }
             }
         </div>
     }
@@ -55,9 +56,16 @@
     private string _query = "";
     private string? _error;
     private TraceXImportResult? _result;
+    private IReadOnlyList<string> _preview = [];
+    private FilePageCursor? _previewCursor;
+    private bool _previewLoading;
+    private int _previewVersion;
+    private CancellationTokenSource? _previewCancellation;
+    private Task? _previewTask;
     private Guid? _profileId;
     private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _operationCancellation;
+    private int _operationVersion;
 
     protected override async Task OnInitializedAsync()
     {
@@ -75,85 +83,147 @@
     private void ProfileChanged(object? sender, Guid? id) => _ = InvokeAsync(async () =>
     {
         _operationCancellation?.Cancel();
+        _operationVersion++;
+        _loading = false;
         _open = false; _query = ""; _error = null;
-        Imports.Delete(_result); _result = null;
+        await ClearResultAsync();
         await RefreshConnectionAsync();
         StateHasChanged();
     });
 
     private void Open() { _open = true; _error = null; }
-    private void Close() { _open = false; _query = ""; _error = null; Imports.Delete(_result); _result = null; }
+    private async Task CloseAsync() { _open = false; _query = ""; _error = null; await ClearResultAsync(); }
+    private async Task ClearResultAsync()
+    {
+        _previewVersion++;
+        if (_previewCancellation is { } cancellation) await cancellation.CancelAsync();
+        if (_previewTask is { } task) await task;
+        _previewLoading = false;
+        _preview = [];
+        _previewCursor = null;
+        Imports.Delete(_result);
+        _result = null;
+    }
+    private Task LoadPreviewAsync()
+    {
+        if (_previewLoading || _result is null) return Task.CompletedTask;
+        return _previewTask = ReadPreviewAsync();
+    }
+    private async Task ReadPreviewAsync()
+    {
+        if (_previewLoading || _result is not { } result || Workbench.ProfileId != result.ProfileId) return;
+        var version = _previewVersion;
+        _previewLoading = true;
+        _error = null;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _previewCancellation = cancellation;
+        try
+        {
+            var page = await Imports.PreviewPageAsync(result, result.ProfileId, _previewCursor, cancellation.Token);
+            if (version != _previewVersion || Workbench.ProfileId != result.ProfileId) return;
+            _preview = _preview.Concat(page.Items).ToArray();
+            _previewCursor = page.NextCursor;
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception)
+        {
+            if (version == _previewVersion && Workbench.ProfileId == result.ProfileId)
+                _error = "Не удалось загрузить следующие строки. Повторите загрузку.";
+        }
+        finally
+        {
+            if (ReferenceEquals(_previewCancellation, cancellation)) _previewCancellation = null;
+            if (version == _previewVersion) _previewLoading = false;
+        }
+    }
     private async Task LoadAsync()
     {
         if (_profileId is not { } id) return;
-        _operationCancellation?.Dispose();
-        _operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        var token = _operationCancellation.Token;
+        if (_loading || _previewLoading) return;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _operationCancellation = cancellation;
+        var version = ++_operationVersion;
+        var token = cancellation.Token;
         _loading = true; _error = null;
-        Imports.Delete(_result); _result = null;
+        await ClearResultAsync();
         try
         {
             var result = await Imports.ImportAsync(id, _query, Columns, token);
-            if (Workbench.ProfileId == id) _result = result; else Imports.Delete(result);
+            if (Workbench.ProfileId == id && version == _operationVersion)
+            {
+                _result = result;
+                await LoadPreviewAsync();
+            }
+            else Imports.Delete(result);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception exception) when (exception is ArgumentException or InvalidDataException or InvalidOperationException)
         {
-            _error = exception.Message;
+            if (version == _operationVersion) _error = exception.Message;
         }
-        catch (Exception) { _error = "Не удалось загрузить данные из базы TraceX."; }
-        finally { _loading = false; _operationCancellation?.Dispose(); _operationCancellation = null; }
+        catch (Exception) { if (version == _operationVersion) _error = "Не удалось загрузить данные из базы TraceX."; }
+        finally
+        {
+            if (version == _operationVersion) _loading = false;
+            if (ReferenceEquals(_operationCancellation, cancellation)) _operationCancellation = null;
+        }
     }
 
     private async Task ApplyAsync(bool append)
     {
         if (_result is not { } result || Workbench.ProfileId != result.ProfileId) return;
+        if (_loading || _previewLoading) return;
+        var version = ++_operationVersion;
         _loading = true; _error = null;
         try
         {
             var text = await Imports.ReadTextAsync(result, result.ProfileId, MaxBytes, _lifetime.Token);
-            if (Workbench.ProfileId != result.ProfileId) return;
+            if (Workbench.ProfileId != result.ProfileId || version != _operationVersion) return;
             await OnApply.InvokeAsync((text, append));
-            Close();
+            await CloseAsync();
         }
         catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException)
         {
-            _error = exception.Message;
+            if (version == _operationVersion) _error = exception.Message;
         }
-        catch (Exception) { _error = "Не удалось подставить данные в форму."; }
-        finally { _loading = false; }
+        catch (Exception) { if (version == _operationVersion) _error = "Не удалось подставить данные в форму."; }
+        finally { if (version == _operationVersion) _loading = false; }
     }
 
     private async Task PrepareAsync()
     {
         if (_result is not { } result || Workbench.ProfileId != result.ProfileId) return;
+        if (_loading || _previewLoading) return;
+        var version = ++_operationVersion;
         _loading = true; _error = null;
         try
         {
-            await using var source = Imports.OpenRead(result, result.ProfileId);
-            var job = await BulkFiles.PrepareAsync(result.ProfileId, result.Bytes, source, _lifetime.Token);
-            if (Workbench.ProfileId != result.ProfileId)
+            BulkCodeJob job;
+            await using (var source = Imports.OpenRead(result, result.ProfileId))
+                job = await BulkFiles.PrepareAsync(result.ProfileId, result.Bytes, source, _lifetime.Token);
+            if (Workbench.ProfileId != result.ProfileId || version != _operationVersion)
             {
                 await BulkFiles.DeleteAsync(result.ProfileId, job.Id, _lifetime.Token);
                 return;
             }
-            Close();
+            await CloseAsync();
             await OnBulkPrepared.InvokeAsync();
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException)
         {
-            _error = "Не удалось подготовить задание. Проверьте свободное место на диске.";
+            if (version == _operationVersion) _error = "Не удалось подготовить задание. Проверьте свободное место на диске.";
         }
-        catch (Exception) { _error = "Не удалось подготовить задание."; }
-        finally { _loading = false; }
+        catch (Exception) { if (version == _operationVersion) _error = "Не удалось подготовить задание."; }
+        finally { if (version == _operationVersion) _loading = false; }
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         Workbench.ProfileChanged -= ProfileChanged;
+        _operationVersion++;
         _operationCancellation?.Cancel();
-        _lifetime.Cancel(); _lifetime.Dispose();
-        Imports.Delete(_result);
-        return ValueTask.CompletedTask;
+        await _lifetime.CancelAsync();
+        await ClearResultAsync();
+        _lifetime.Dispose();
     }
 }

@@ -1,0 +1,99 @@
+@using CrptWorkbench.Application
+
+<div class="bulk-summary">
+    <div class="bulk-summary-counts" aria-label="Количество КМ по статусам">
+        @foreach (var entry in Counts.OrderBy(x => x.Key, StringComparer.Ordinal))
+        {
+            <span class="outcome-badge @Tone(entry.Key)">@CodeInfoResults.StatusLabel(entry.Key): @entry.Value</span>
+        }
+    </div>
+    <div class="bulk-summary-actions">
+        <strong>КМ по выбранным фильтрам: @SelectedCount</strong>
+        <button type="button" class="button ghost" disabled="@(SelectedCount == 0)" @onclick="OnDownload">Скачать КМ выбранных статусов</button>
+    </div>
+    @if (CanPreview)
+    {
+        <div class="bulk-preview-panel">
+            <button type="button" class="button ghost bulk-preview-toggle" aria-expanded="@_open" @onclick="TogglePreviewAsync">@(_open ? "Скрыть предпросмотр КМ" : "Предпросмотр КМ")</button>
+            @if (_open)
+            {
+                @if (_preview is not null)
+                {
+                    @if (_preview.Count == 0) { <p class="muted">Нет КМ для выбранных статусов.</p> }
+                    else { <div class="bulk-preview-codes" aria-label="Предпросмотр кодов маркировки">@foreach (var previewCode in _preview) { <div>@previewCode</div> }</div> }
+                }
+                <ShowMore VisibleCount="@(_preview?.Count ?? 0)" TotalCount="@SelectedCount" HasMore="@(_loadedKey is null || _cursor is not null)" Loading="@_loading" OnMore="LoadMoreAsync" />
+                @if (_error is not null) { <p class="error-text" role="alert">@_error</p> }
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyDictionary<string, long> Counts { get; set; } = new Dictionary<string, long>();
+    [Parameter] public long SelectedCount { get; set; }
+    [Parameter] public bool CanPreview { get; set; }
+    [Parameter] public string PreviewKey { get; set; } = "";
+    [Parameter, EditorRequired] public EventCallback OnDownload { get; set; }
+    [Parameter] public Func<FilePageCursor?, Task<FileRecordPage>>? PreviewPageLoader { get; set; }
+    private bool _open;
+    private IReadOnlyList<string>? _preview;
+    private string? _error;
+    private bool _loading;
+    private string? _loadedKey;
+    private string? _activeKey;
+    private long _requestVersion;
+    private FilePageCursor? _cursor;
+
+    protected override void OnParametersSet()
+    {
+        if (_activeKey != PreviewKey)
+        {
+            _activeKey = PreviewKey;
+            _requestVersion++;
+            _loadedKey = null;
+            _preview = null;
+            _open = false;
+            _loading = false;
+            _error = null;
+            _cursor = null;
+        }
+    }
+
+    private async Task TogglePreviewAsync()
+    {
+        _open = !_open;
+        if (!_open) return;
+        if (_loadedKey == PreviewKey) return;
+        await LoadMoreAsync();
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        if (PreviewPageLoader is null || _loading || (_loadedKey is not null && _cursor is null)) return;
+        var key = PreviewKey;
+        var version = ++_requestVersion;
+        _loading = true;
+        _error = null;
+        try
+        {
+            var page = await PreviewPageLoader(_cursor);
+            if (version == _requestVersion && key == PreviewKey)
+            {
+                _preview = (_preview ?? []).Concat(page.Items).ToArray();
+                _cursor = page.NextCursor;
+                _loadedKey = key;
+            }
+        }
+        catch (Exception) { if (version == _requestVersion && key == PreviewKey) _error = "Не удалось загрузить предпросмотр."; }
+        finally { if (version == _requestVersion) _loading = false; }
+    }
+
+    private static string Tone(string status) => status switch
+    {
+        "INTRODUCED" => "tone-success",
+        "APPLIED_NOT_PAID" => "tone-warning",
+        "EMITTED" or "APPLIED" => "tone-info",
+        _ => "tone-neutral"
+    };
+}

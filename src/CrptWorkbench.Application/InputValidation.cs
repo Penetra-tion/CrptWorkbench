@@ -50,6 +50,9 @@ public static class InputValidation
                 case TrueApiBulkCodeInfoHandler.OperationId:
                     TrueApiBulkCodeInfoHandler.Parse(values);
                     break;
+                case TrueApiAggregationTreeHandler.OperationId:
+                    TrueApiAggregationTreeHandler.Parse(values);
+                    break;
                 case TrueApiDocumentStatusHandler.OperationId:
                     TrueApiDocumentStatusHandler.Parse(values);
                     break;
@@ -78,6 +81,7 @@ public static class InputValidation
         catch (ArgumentException exception)
         {
             var field = operationId is TrueApiCodeInfoHandler.OperationId or TrueApiBulkCodeInfoHandler.OperationId ? "codes" :
+                operationId == TrueApiAggregationTreeHandler.OperationId ? "code" :
                 operationId == MercuryVsdInfoHandler.OperationId ? "uid" :
                 operationId == PermitDocumentLookupHandler.OperationId ? "number" : "documentId";
             if (operationId == TrueApiDocumentStatusHandler.OperationId && exception.Message.Contains("товарной группы", StringComparison.Ordinal)) field = "productGroup";

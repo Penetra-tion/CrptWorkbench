@@ -12,6 +12,7 @@ public sealed class BulkCodeJobProcessor(
     private static readonly UTF8Encoding Utf8 = new(false, true);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Regex CodeCharacters = new("^[A-Za-z0-9%&'\"()*+,_./:;<=>?!-]{18,74}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private readonly SemaphoreSlim _batchPersistenceGate = new(1, 1);
 
     public async Task ProcessNextAsync(CancellationToken cancellationToken)
     {
@@ -40,11 +41,16 @@ public sealed class BulkCodeJobProcessor(
                 }
 
                 var pending = (await jobs.ListBatchesAsync(job.Id, "Queued", 4, cancellationToken)).ToList();
-                while (pending.Count < 4 && job.NextOffset < job.FileBytes)
+                while (pending.Count < 4 && job.NextOffset < job.FileBytes && job.State != "CancelRequested")
                 {
                     var next = await PrepareBatchAsync(job, cancellationToken);
-                    pending.Add(next);
                     job = (await jobs.GetAsync(job.ProfileId, job.Id, cancellationToken))!;
+                    if (job.State == "CancelRequested")
+                    {
+                        await FinishAsync(job, "Canceled", null, cancellationToken);
+                        return;
+                    }
+                    pending.Add(next);
                 }
                 if (pending.Count == 0)
                 {
@@ -134,13 +140,13 @@ public sealed class BulkCodeJobProcessor(
             if (files.FragmentExists(job.Id, batch.Number))
             {
                 var (existingFound, existingErrors) = files.FragmentSummary(job.Id, batch.Number);
-                await jobs.CompleteBatchAsync(job.Id, batch.Number, existingFound, existingErrors, cancellationToken);
+                await CompleteBatchAsync(job.Id, batch.Number, existingFound, existingErrors, cancellationToken);
                 return;
             }
             if (batch.CodeCount == 0)
             {
                 await files.WriteFragmentAsync(job.Id, batch.Number, [], 0, 0, cancellationToken);
-                await jobs.CompleteBatchAsync(job.Id, batch.Number, 0, 0, cancellationToken);
+                await CompleteBatchAsync(job.Id, batch.Number, 0, 0, cancellationToken);
                 return;
             }
             var codes = await ReadCodesAsync(job.Id, batch, cancellationToken);
@@ -177,15 +183,29 @@ public sealed class BulkCodeJobProcessor(
             fileOperation = true;
             await files.WriteFragmentAsync(job.Id, batch.Number, entries, found, result.ErrorCount, cancellationToken);
             fileOperation = false;
-            await jobs.CompleteBatchAsync(job.Id, batch.Number, found, result.ErrorCount, cancellationToken);
+            await CompleteBatchAsync(job.Id, batch.Number, found, result.ErrorCount, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (IOException) when (fileOperation) { throw; }
         catch (Exception exception)
         {
-            await jobs.FailBatchAsync(job.Id, batch.Number,
+            await FailBatchAsync(job.Id, batch.Number,
                 exception is IOException ? "Ошибка диска." : exception is InvalidDataException ? exception.Message : "Ошибка запроса к ЧЗ.", cancellationToken);
         }
+    }
+
+    private async Task CompleteBatchAsync(Guid jobId, long number, int found, int errors, CancellationToken cancellationToken)
+    {
+        await _batchPersistenceGate.WaitAsync(cancellationToken);
+        try { await jobs.CompleteBatchAsync(jobId, number, found, errors, cancellationToken); }
+        finally { _batchPersistenceGate.Release(); }
+    }
+
+    private async Task FailBatchAsync(Guid jobId, long number, string error, CancellationToken cancellationToken)
+    {
+        await _batchPersistenceGate.WaitAsync(cancellationToken);
+        try { await jobs.FailBatchAsync(jobId, number, error, cancellationToken); }
+        finally { _batchPersistenceGate.Release(); }
     }
 
     private async Task<string[]> ReadCodesAsync(Guid jobId, BulkCodeBatch batch, CancellationToken cancellationToken)

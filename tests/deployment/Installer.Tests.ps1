@@ -7,7 +7,7 @@ $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($installer, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
 # Load only pure helpers, never execute the installer or touch a Windows service.
-foreach ($name in @('Set-ExistingServiceConfiguration', 'Set-ProtectedDirectoryAccess', 'Get-WorkbenchServiceEnvironment', 'ConvertFrom-WorkbenchJson', 'Restore-InstalledSettings')) {
+foreach ($name in @('Set-ExistingServiceConfiguration', 'Set-ProtectedDirectoryAccess', 'Get-ExistingServiceEnvironment', 'Get-WorkbenchServiceEnvironment', 'ConvertFrom-WorkbenchJson', 'Restore-InstalledSettings')) {
     $definition = $ast.Find({ param($node)
         $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
     }, $true)
@@ -17,6 +17,13 @@ foreach ($name in @('Set-ExistingServiceConfiguration', 'Set-ProtectedDirectoryA
 function Assert($Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
+$script:registryProperties = [pscustomobject]@{ PSChildName = 'CrptWorkbench' }
+function Get-ItemProperty { param($LiteralPath, $ErrorAction) return $script:registryProperties }
+Assert (@(Get-ExistingServiceEnvironment -RegistryPath 'HKLM:\SYSTEM\CurrentControlSet\Services\CrptWorkbench').Count -eq 0) 'A new service has no Environment registry value.'
+$script:registryProperties = [pscustomobject]@{ Environment = @('CustomSetting=keep=all', 'ASPNETCORE_URLS=http://old') }
+$storedEnvironment = @(Get-ExistingServiceEnvironment -RegistryPath 'HKLM:\SYSTEM\CurrentControlSet\Services\CrptWorkbench')
+Assert ($storedEnvironment.Count -eq 2 -and $storedEnvironment[0] -eq 'CustomSetting=keep=all') 'Existing service environment was not preserved.'
+Remove-Item Function:Get-ItemProperty
 $freshEnvironment = @(Get-WorkbenchServiceEnvironment -Port 5080 -DataPath 'C:\ProgramData\CrptWorkbench')
 Assert ($freshEnvironment.Count -eq 3) 'New installation must only set host environment, URL and data directory.'
 Assert ($freshEnvironment -contains 'ASPNETCORE_ENVIRONMENT=Production') 'Host environment must remain Production.'

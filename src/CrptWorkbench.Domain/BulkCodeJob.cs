@@ -34,6 +34,8 @@ public sealed class BulkCodeBatch
 
 public interface IBulkCodeJobRepository
 {
+    Task<IReadOnlyList<BulkCodeJob>> GetManyAsync(Guid profileId, IReadOnlyList<Guid> ids, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    Task<RecordPage<BulkCodeJob>> ListPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     Task AddAsync(BulkCodeJob job, CancellationToken cancellationToken);
     Task<IReadOnlyList<BulkCodeJob>> ListAsync(Guid profileId, CancellationToken cancellationToken);
     Task<BulkCodeJob?> GetAsync(Guid profileId, Guid id, CancellationToken cancellationToken);
@@ -50,6 +52,7 @@ public interface IBulkCodeJobRepository
 
 public interface IBulkCodeFileStore
 {
+    Task<FileRecordPage> ReadPageAsync(Guid jobId, long batchCount, IReadOnlySet<string> statuses, FilePageCursor? cursor = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     Task SaveSourceAsync(Guid jobId, Stream source, CancellationToken cancellationToken);
     Stream OpenSource(Guid jobId, long offset);
     long SourceLength(Guid jobId);
@@ -57,5 +60,6 @@ public interface IBulkCodeFileStore
     bool FragmentExists(Guid jobId, long batchNumber);
     (int Found, int Errors) FragmentSummary(Guid jobId, long batchNumber);
     IAsyncEnumerable<string> ReadCodesAsync(Guid jobId, long batchCount, IReadOnlySet<string> statuses, CancellationToken cancellationToken);
+    Task<IReadOnlyDictionary<string, long>> CountCodesByStatusAsync(Guid jobId, long batchCount, CancellationToken cancellationToken);
     void Delete(Guid jobId);
 }

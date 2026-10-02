@@ -15,12 +15,11 @@
 </div>
 }
 <div class="code-result-list">
-    @foreach (var item in Results.Items)
-    {
-        var info = item.CisInfo;
+    <IncrementalList Items="@Results.Items" Context="item" ResetKey="@Results.Items"><ChildContent>
+        @{ var info = item.CisInfo;
         var found = CodeInfoResults.IsFound(item);
         var appearance = ResultStatusAppearance.ForCode(item);
-        var packageCode = CodeInfoResults.PackageTypeCode(info);
+        var packageCode = CodeInfoResults.PackageTypeCode(info); }
         <article class="code-result-card">
             <header class="code-card-head">
                 <div class="code-card-title">
@@ -49,10 +48,10 @@
                     <div class="code-response-code"><span class="muted">Код из ответа</span><code>@info.Cis</code></div>
                 }
                 <dl class="code-primary-fields">
-                    <div><dt>GTIN</dt><dd>@if (!string.IsNullOrWhiteSpace(info.Gtin)) { <button type="button" class="code-history-link" disabled="@Busy" title="Запросить товар в Национальном каталоге" @onclick="() => OnGtinSelected.InvokeAsync(info.Gtin)">@info.Gtin</button> } else { @GtinValue(info) }</dd></div>
+                    <div><dt>GTIN</dt><dd>@if (!string.IsNullOrWhiteSpace(info.Gtin)) { <button type="button" class="code-field-link" disabled="@Busy" title="Запросить товар в Национальном каталоге" @onclick="() => OnGtinSelected.InvokeAsync(info.Gtin)">@info.Gtin</button> } else { @GtinValue(info) }</dd></div>
                     @if (VsdValue(info) is { } vsd)
                     {
-                        <div><dt>ВСД</dt><dd>@if (IsMercuryUid(vsd)) { <button type="button" class="code-history-link" disabled="@Busy" title="Запросить ВСД в Меркурии" @onclick="() => OnVsdSelected.InvokeAsync(vsd)">@vsd</button> } else { @vsd }</dd></div>
+                        <div><dt>ВСД</dt><dd>@if (IsMercuryUid(vsd)) { <button type="button" class="code-field-link" disabled="@Busy" title="Запросить ВСД в Меркурии" @onclick="() => OnVsdSelected.InvokeAsync(vsd)">@vsd</button> } else { @vsd }</dd></div>
                     }
                     <div><dt>Владелец</dt><dd>@(info.OwnerName ?? "—") @if (info.OwnerInn is not null) { <small class="muted">ИНН @info.OwnerInn</small> }</dd></div>
                     @if (info.Status is "RETIRED" or "WITHDRAWN" or "WRITTEN_OFF")
@@ -75,17 +74,20 @@
                     {
                         <div><dt>Дата эмиссии</dt><dd>@FormatDate(info.EmissionDate)</dd></div>
                     }
+                    @if (info.ProducedDate.HasValue)
+                    {
+                        <div><dt>Дата производства</dt><dd>@FormatDate(info.ProducedDate)</dd></div>
+                    }
                     @if (info.ExpirationDate.HasValue || info.Expirations is { Count: > 0 })
                     {
                         <div class="code-expiration-field"><dt>Срок годности</dt><dd>
                             @if (info.Expirations is { Count: > 0 })
                             {
-                                <span class="code-expiration-list">
-                                    @foreach (var expiration in info.Expirations)
-                                    {
+                                <div class="code-expiration-list">
+                                    <IncrementalList Items="@info.Expirations" Context="expiration" ResetKey="@info.Expirations"><ChildContent>
                                         <span>@FormatDate(expiration.ExpirationStorageDate)@if (!string.IsNullOrWhiteSpace(expiration.StorageConditionName)) { <small class="muted">@expiration.StorageConditionName</small> }@if (expiration.StorageConditionId.HasValue) { <small class="muted">Условие хранения: @expiration.StorageConditionId</small> }</span>
-                                    }
-                                </span>
+                                    </ChildContent></IncrementalList>
+                                </div>
                             }
                             else { @FormatDate(info.ExpirationDate) }
                         </dd></div>
@@ -102,8 +104,20 @@
                         @if (info.CertDoc is { Count: > 0 })
                         {
                             <div class="permit-list">
-                                @foreach (var document in info.CertDoc)
-                                {
+                                <IncrementalList Items="@info.CertDoc" Context="document" ResetKey="@info.CertDoc"><ChildContent>
+                                    @if (CanRequestPermit(document.Number))
+                                    {
+                                    <button type="button" class="permit-document permit-document-link" disabled="@Busy" title="Проверить документ в реестре" @onclick="() => OnPermitSelected.InvokeAsync(document.Number)">
+                                        <strong>@CodeInfoResults.PermitDocumentTypeLabel(document.Type)</strong>
+                                        @if (!string.IsNullOrWhiteSpace(document.Type)) { <span class="muted">@document.Type</span> }
+                                        @if (!string.IsNullOrWhiteSpace(document.Number)) { <span>Номер: @document.Number</span> }
+                                        @if (!string.IsNullOrWhiteSpace(document.Date)) { <span>Дата: @FormatPermitDate(document.Date)</span> }
+                                        @if (!string.IsNullOrWhiteSpace(document.WellNumber)) { <span>Скважина: @document.WellNumber</span> }
+                                        @if (document.Indx.HasValue) { <span>Индекс: @document.Indx</span> }
+                                    </button>
+                                    }
+                                    else
+                                    {
                                     <div class="permit-document">
                                         <strong>@CodeInfoResults.PermitDocumentTypeLabel(document.Type)</strong>
                                         @if (!string.IsNullOrWhiteSpace(document.Type)) { <span class="muted">@document.Type</span> }
@@ -111,9 +125,9 @@
                                         @if (!string.IsNullOrWhiteSpace(document.Date)) { <span>Дата: @FormatPermitDate(document.Date)</span> }
                                         @if (!string.IsNullOrWhiteSpace(document.WellNumber)) { <span>Скважина: @document.WellNumber</span> }
                                         @if (document.Indx.HasValue) { <span>Индекс: @document.Indx</span> }
-                                        @if (document.StatusGroup.HasValue) { <span>@CodeInfoResults.PermitStatusGroupLabel(document.StatusGroup) · группа @document.StatusGroup</span> }
                                     </div>
-                                }
+                                    }
+                                </ChildContent></IncrementalList>
                             </div>
                         }
                         else if (info.CertDocRequirementDetails is not null)
@@ -127,6 +141,20 @@
                                 }
                             </div>
                         }
+                        @if (info.Licences is { Count: > 0 })
+                        {
+                            <div class="permit-list">
+                                <IncrementalList Items="@(info.Licences.Where(licence => !string.IsNullOrWhiteSpace(licence.LicenceNumber) || !string.IsNullOrWhiteSpace(licence.LicenceDate)))" Context="licence" ResetKey="@info.Licences"><ChildContent>
+                                    @if (!string.IsNullOrWhiteSpace(licence.LicenceNumber) || !string.IsNullOrWhiteSpace(licence.LicenceDate))
+                                    {
+                                        <div class="permit-document">
+                                            @if (!string.IsNullOrWhiteSpace(licence.LicenceNumber)) { <span>Лицензия: @licence.LicenceNumber</span> }
+                                            @if (!string.IsNullOrWhiteSpace(licence.LicenceDate)) { <span>Дата лицензии: @FormatPermitDate(licence.LicenceDate)</span> }
+                                        </div>
+                                    }
+                                </ChildContent></IncrementalList>
+                            </div>
+                        }
                     </section>
                 }
                 @if (info.Child is { Count: > 0 } children)
@@ -135,10 +163,9 @@
                         <summary class="disclosure-toggle">Состав упаковки · @children.Count</summary>
                         <div class="disclosure-content">
                             <ul class="code-link-list">
-                                @foreach (var child in children)
-                                {
+                                <IncrementalList Items="@children" Context="child" ResetKey="@children"><ChildContent>
                                     <li><button type="button" class="related-code-link" disabled="@Busy" title="Запросить сведения по коду" @onclick="() => OnCodeSelected.InvokeAsync(child)"><code>@child</code></button></li>
-                                }
+                                </ChildContent><ControlsContent Context="controls"><li>@controls</li></ControlsContent></IncrementalList>
                             </ul>
                         </div>
                     </details>
@@ -148,28 +175,20 @@
                     <details class="code-detail-disclosure code-bottom-disclosure">
                         <summary class="disclosure-toggle">Документы по коду · @documents.Count</summary>
                         <div class="disclosure-content">
-                            <div class="code-history-scroll">
+                            <IncrementalList Items="@documents" ResetKey="@documents"><ItemsContent Context="visibleDocuments"><div class="code-history-scroll">
                                 <table class="code-history-table">
                                     <thead><tr><th>Операция</th><th>Дата обработки</th><th>Идентификатор</th><th>Отправитель</th><th>Получатель</th></tr></thead>
                                     <tbody>
-                                        @foreach (var document in documents)
+                                        @foreach (var document in visibleDocuments)
                                         {
-                                            <tr>
+                                            <tr class="@(CodeHistoryDocumentLookup.IsValidId(document.DocumentId) ? "code-history-row-link" : null)" role="@(CodeHistoryDocumentLookup.IsValidId(document.DocumentId) ? "link" : null)" tabindex="@(CodeHistoryDocumentLookup.IsValidId(document.DocumentId) && !Busy ? "0" : null)" title="@(CodeHistoryDocumentLookup.IsValidId(document.DocumentId) ? "Запросить документ в API Console" : null)" @onclick="() => OpenHistoryDocument(document.DocumentId, info?.ProductGroup)" @onkeydown="args => OnHistoryRowKeyDown(args, document.DocumentId, info?.ProductGroup)">
                                                 <td>
-                                                    @if (CodeHistoryDocumentLookup.IsValidId(document.DocumentId))
-                                                    {
-                                                        <button type="button" class="code-history-link" disabled="@Busy" title="Запросить документ в API Console" @onclick="() => OnDocumentSelected.InvokeAsync(new CodeHistoryDocumentSelection(document.DocumentId!, ApiSystem.TrueApi, info?.ProductGroup))">@DocumentTypeLabel(document.Type)</button>
-                                                    }
-                                                    else { @DocumentTypeLabel(document.Type) }
+                                                    <span class="@(CodeHistoryDocumentLookup.IsValidId(document.DocumentId) ? "code-history-row-label" : null)">@DocumentTypeLabel(document.Type)</span>
                                                     @if (!string.IsNullOrWhiteSpace(document.Status)) { <small class="muted">@DocumentStatusResults.Status(document.Status)</small> }
                                                 </td>
                                                 <td>@FormatDate(document.ProcessedAt)</td>
                                                 <td class="code-history-id">
-                                                    @if (CodeHistoryDocumentLookup.IsValidId(document.DocumentId))
-                                                    {
-                                                        <button type="button" class="code-history-link" disabled="@Busy" title="Запросить документ в API Console" @onclick="() => OnDocumentSelected.InvokeAsync(new CodeHistoryDocumentSelection(document.DocumentId!, ApiSystem.TrueApi, info?.ProductGroup))">@document.DocumentId</button>
-                                                    }
-                                                    else { @(document.DocumentId ?? "—") }
+                                                    <span class="@(CodeHistoryDocumentLookup.IsValidId(document.DocumentId) ? "code-history-row-label" : null)">@(document.DocumentId ?? "—")</span>
                                                 </td>
                                                 <td>@PartyLabel(document.SenderName, document.SenderInn)</td>
                                                 <td>@PartyLabel(document.ReceiverName, document.ReceiverInn)</td>
@@ -178,6 +197,7 @@
                                     </tbody>
                                 </table>
                             </div>
+                            </ItemsContent></IncrementalList>
                             @if (!string.IsNullOrWhiteSpace(item.DocumentHistory.Warning))
                             {
                                 <p class="muted">@item.DocumentHistory.Warning</p>
@@ -187,7 +207,7 @@
                 }
             }
         </article>
-    }
+    </ChildContent></IncrementalList>
 </div>
 
 @code {
@@ -196,9 +216,18 @@
     [Parameter] public EventCallback<string> OnGtinSelected { get; set; }
     [Parameter] public EventCallback<string> OnVsdSelected { get; set; }
     [Parameter] public EventCallback<CodeHistoryDocumentSelection> OnDocumentSelected { get; set; }
+    [Parameter] public EventCallback<string> OnPermitSelected { get; set; }
     [Parameter] public bool Busy { get; set; }
     [Parameter] public bool ShowSummary { get; set; } = true;
     [Parameter] public bool ShowOwnCodeAction { get; set; }
+
+    private Task OpenHistoryDocument(string? documentId, string? productGroup) =>
+        Busy || !CodeHistoryDocumentLookup.IsValidId(documentId)
+            ? Task.CompletedTask
+            : OnDocumentSelected.InvokeAsync(new CodeHistoryDocumentSelection(documentId!, ApiSystem.TrueApi, productGroup));
+
+    private Task OnHistoryRowKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs args, string? documentId, string? productGroup) =>
+        args.Key is "Enter" or " " ? OpenHistoryDocument(documentId, productGroup) : Task.CompletedTask;
 
     private static bool OmitsProductDetails(CisInfo? info) => CodeInfoResults.PackageTypeCode(info) is "BOX" or "ATK";
 
@@ -208,8 +237,14 @@
             ? info.WithdrawReasonOther
             : CodeInfoResults.WithdrawalReasonLabel(info.WithdrawReason);
 
-    private static bool HasPermits(CisInfo info) => info.CertDoc is { Count: > 0 } ||
+    private static bool HasPermits(CisInfo info) => info.CertDoc is { Count: > 0 } || info.Licences?.Any(x => !string.IsNullOrWhiteSpace(x.LicenceNumber) || !string.IsNullOrWhiteSpace(x.LicenceDate)) == true ||
         info.CertDocRequirementDetails is not null;
+
+    private static bool CanRequestPermit(string? number)
+    {
+        try { PermitDocumentNumbers.Parse(number); return true; }
+        catch (ArgumentException) { return false; }
+    }
 
     private static string PaymentLabel(CodeDocumentHistory? history) => history is null ? "Не запрашивалась" : history.Paid switch
     {
@@ -280,5 +315,8 @@
         return value;
     }
 }
+
+
+
 
 

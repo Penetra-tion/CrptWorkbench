@@ -1,0 +1,118 @@
+@inject IJSRuntime JavaScript
+@implements IDisposable
+
+<div class="aggregation-result">
+    <div class="panel-title">
+        <div><h2>Дерево агрегации</h2><p class="muted">@Result.Nodes.Count кодов · @(Result.IncludeSiblings ? "все доступные ветви" : "вложения введённого кода и его родители")</p></div>
+        <button type="button" class="button ghost" disabled="@(!_canExport || _downloading)" @onclick="DownloadAsync">@(_downloading ? "Подготовка…" : "Скачать агрегацию TXT")</button>
+    </div>
+    @if (!Result.Complete)
+    {
+        <div class="notice" role="status"><strong>Частичный результат.</strong> TXT содержит только подтверждённые пути; ошибочные и незагруженные ветви исключены.</div>
+    }
+    @if (Result.Diagnostics.Count > 0)
+    {
+        <details class="exchange-section"><summary>Проблемы загрузки (@Result.Diagnostics.Count)</summary><IncrementalList Items="@Result.Diagnostics" ResetKey="@Result"><ItemsContent Context="issues"><ul>@foreach (var issue in issues) { <li>@issue</li> }</ul></ItemsContent></IncrementalList></details>
+    }
+    @if (_downloadError is not null) { <p class="error-text" role="alert">@_downloadError</p> }
+    <div class="aggregation-tree" role="tree" aria-label="Дерево агрегации" tabindex="0">
+        <Virtualize Items="_rows" Context="entry" ItemSize="76" OverscanCount="5">
+            @{ var row = entry.Row; }
+            @if (entry.MoreFor is { } parent)
+            {
+                <div @key="@($"more:{parent}")" class="aggregation-row" style="@($"--tree-depth:{Math.Min(row.Depth, 12)}")">
+                    <ShowMore VisibleCount="@entry.VisibleChildren" TotalCount="@entry.TotalChildren" HasMore="@(entry.VisibleChildren < entry.TotalChildren)" OnMore="() => MoreChildren(parent)" />
+                </div>
+            }
+            else
+            {
+            <div @key="row.Node.Code" class="aggregation-row @(row.Node.Code == Result.RequestedCode ? "aggregation-requested" : null)" role="treeitem" aria-level="@(row.Depth + 1)" aria-expanded="@(row.HasChildren ? _expanded.Contains(row.Node.Code) : (bool?)null)" style="@($"--tree-depth:{Math.Min(row.Depth, 12)}")">
+                @if (row.HasChildren)
+                {
+                    <button type="button" class="aggregation-toggle" aria-label="@($"{(_expanded.Contains(row.Node.Code) ? "Свернуть" : "Раскрыть")} {row.Node.Code}")" aria-expanded="@_expanded.Contains(row.Node.Code)" @onclick="() => Toggle(row.Node.Code)" @onkeydown="args => OnKey(args, row.Node.Code)">@(_expanded.Contains(row.Node.Code) ? "−" : "+")</button>
+                }
+                else { <span class="aggregation-toggle" aria-hidden="true">·</span> }
+                <div class="aggregation-node">
+                    <a href="@CodeUrl(row.Node.Code)" class="aggregation-code">@row.Node.Code</a>
+                    <div class="aggregation-meta"><span>@PackageLabel(row.Node.PackageType)</span><span>@CodeInfoResults.StatusLabel(row.Node.Status)</span><span>Вложений: @row.Node.ChildCount</span>@if (row.Node.Code == Result.RequestedCode) { <strong>Введённый код</strong> }</div>
+                    @if (row.Node.Error is not null) { <small class="error-text">@row.Node.Error</small> }
+                    else if (!row.Node.Loaded) { <small class="muted">Не загружено</small> }
+                    @if (row.Node.OmittedChildren > 0) { <small class="muted">Незагруженные ветви: @row.Node.OmittedChildren</small> }
+                </div>
+            </div>
+            }
+        </Virtualize>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public AggregationTreeResult Result { get; set; } = default!;
+    private AggregationTreeResult? _previous;
+    private readonly HashSet<string> _expanded = new(StringComparer.Ordinal);
+    private ICollection<IncrementalAggregationRow> _rows = new List<IncrementalAggregationRow>();
+    private IncrementalAggregationRows? _rowBuilder;
+    private readonly Dictionary<string, int> _childLimits = new(StringComparer.Ordinal);
+    private readonly CancellationTokenSource _lifetime = new();
+    private bool _canExport, _downloading;
+    private string? _downloadError;
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(Result, _previous)) return;
+        _previous = Result;
+        _expanded.Clear();
+        _childLimits.Clear();
+        _rowBuilder = new(Result);
+        _expanded.Add(Result.RootCode);
+        var parents = Result.Links.GroupBy(link => link.Child).ToDictionary(group => group.Key, group => group.ToArray());
+        var code = Result.RequestedCode;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        while (seen.Add(code) && parents.TryGetValue(code, out var links) && links.Length == 1)
+        {
+            code = links[0].Parent;
+            _expanded.Add(code);
+        }
+        RebuildRows();
+        _canExport = Result.CanExport;
+        _downloadError = null;
+    }
+    private void Toggle(string code)
+    {
+        if (!_expanded.Remove(code)) _expanded.Add(code);
+        RebuildRows();
+    }
+    private void OnKey(KeyboardEventArgs args, string code)
+    {
+        if (args.Key == "ArrowRight" && _expanded.Add(code) || args.Key == "ArrowLeft" && _expanded.Remove(code))
+            RebuildRows();
+    }
+    private void RebuildRows() => _rows = _rowBuilder?.Build(_expanded, _childLimits) ?? [];
+    private void MoreChildren(string parent)
+    {
+        _childLimits[parent] = _childLimits.GetValueOrDefault(parent, 100) + 100;
+        RebuildRows();
+    }
+    private static string PackageLabel(string? type) => type switch
+    {
+        "UNIT" => "Единица товара", "GROUP" => "Групповая упаковка", "SET" => "Набор",
+        "BUNDLE" => "Комплект", "BOX" => "Транспортная упаковка", "ATK" => "АТК",
+        null or "" => "Тип неизвестен", _ => type
+    };
+    private static string CodeUrl(string code) => "/console?code=" + Uri.EscapeDataString(code);
+    private async Task DownloadAsync()
+    {
+        if (!_canExport || _downloading) return;
+        _downloading = true;
+        _downloadError = null;
+        try
+        {
+            using var stream = Result.OpenTxtStream(_lifetime.Token);
+            using var reference = new DotNetStreamReference(stream);
+            await JavaScript.InvokeVoidAsync("crptWorkbench.downloadStream", _lifetime.Token, "aggregation.txt", reference);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (JSException) { _downloadError = "Не удалось скачать TXT. Повторите скачивание."; }
+        finally { _downloading = false; }
+    }
+    public void Dispose() { _lifetime.Cancel(); _lifetime.Dispose(); }
+}

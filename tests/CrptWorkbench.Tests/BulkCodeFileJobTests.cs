@@ -19,6 +19,86 @@ public sealed class BulkCodeFileJobTests
     private static string Code(int number) => $"010460000000000021{number:D12}";
 
     [Fact]
+    public async Task AddingPreparedBatchPreservesCancellationRequest()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var payload = Encoding.UTF8.GetBytes(Code(1));
+        await using var source = new MemoryStream(payload);
+        var job = await fixture.Service.UploadAsync(DemoProfile, "cancel-during-prepare.txt", payload.Length, source, TestContext.Current.CancellationToken);
+        await fixture.Service.CancelAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken);
+        await fixture.Jobs.AddBatchAsync(new BulkCodeBatch
+        {
+            JobId = job.Id, Number = 0, StartOffset = 0, EndOffset = payload.Length, CodeCount = 1
+        }, 1, TestContext.Current.CancellationToken);
+
+        Assert.Equal("CancelRequested", (await fixture.Service.GetAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken))!.State);
+        var client = new FakeClient();
+        await fixture.Processor(client).ProcessNextAsync(TestContext.Current.CancellationToken);
+        Assert.Empty(client.Requests);
+        Assert.Equal("Canceled", (await fixture.Service.GetAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken))!.State);
+    }
+
+    [Fact]
+    public async Task StatusCountsAddLateFragmentsExactlyOnce()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var payload = Encoding.UTF8.GetBytes(Code(1) + "\n" + Code(2));
+        await using var source = new MemoryStream(payload);
+        var job = await fixture.Service.UploadAsync(DemoProfile, "out-of-order.txt", payload.Length, source, TestContext.Current.CancellationToken);
+        for (var number = 0; number < 2; number++)
+            await fixture.Jobs.AddBatchAsync(new BulkCodeBatch
+            {
+                JobId = job.Id, Number = number, StartOffset = number, EndOffset = number + 1, CodeCount = 1
+            }, number + 1, TestContext.Current.CancellationToken);
+        await fixture.Files.WriteFragmentAsync(job.Id, 1, [("INTRODUCED", Code(2))], 1, 0, TestContext.Current.CancellationToken);
+        Assert.Equal(1, (await fixture.Service.CountCodesByStatusAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken)).GetValueOrDefault("INTRODUCED"));
+        await fixture.Files.WriteFragmentAsync(job.Id, 0, [("APPLIED_NOT_PAID", Code(1))], 1, 0, TestContext.Current.CancellationToken);
+        var counts = await fixture.Service.CountCodesByStatusAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken);
+        Assert.Equal(1, counts.GetValueOrDefault("INTRODUCED"));
+        Assert.Equal(1, counts.GetValueOrDefault("APPLIED_NOT_PAID"));
+        Assert.Equal(counts, await fixture.Service.CountCodesByStatusAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task StatusCountsMatchExportAndStayWithinProfile()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var payload = Encoding.UTF8.GetBytes(Code(1) + "\n" + Code(2) + "\n" + Code(3));
+        await using var source = new MemoryStream(payload);
+        var job = await fixture.Service.UploadAsync(DemoProfile, "count.txt", payload.Length, source, TestContext.Current.CancellationToken);
+        await fixture.Jobs.AddBatchAsync(new BulkCodeBatch
+        {
+            JobId = job.Id, Number = 0, StartOffset = 0, EndOffset = payload.Length, CodeCount = 3
+        }, 3, TestContext.Current.CancellationToken);
+        await fixture.Files.WriteFragmentAsync(job.Id, 0,
+            [("INTRODUCED", Code(1)), ("APPLIED_NOT_PAID", Code(2)), ("INTRODUCED", Code(3))],
+            3, 0, TestContext.Current.CancellationToken);
+        await fixture.Jobs.CompleteBatchAsync(job.Id, 0, 3, 0, TestContext.Current.CancellationToken);
+        await fixture.Jobs.SetJobStateAsync(DemoProfile, job.Id, "Completed", null, TestContext.Current.CancellationToken);
+
+        var counts = await fixture.Service.CountCodesByStatusAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken);
+        foreach (var statuses in new[]
+        {
+            new HashSet<string>(), new HashSet<string> { "INTRODUCED" },
+            new HashSet<string> { "INTRODUCED", "APPLIED_NOT_PAID" }, new HashSet<string> { "EMITTED" }
+        })
+        {
+            var exported = new List<string>();
+            await foreach (var code in fixture.Service.ExportAsync(DemoProfile, job.Id, statuses, TestContext.Current.CancellationToken))
+                exported.Add(code);
+            Assert.Equal(exported.Count, statuses.Sum(status => counts.GetValueOrDefault(status)));
+        }
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.CountCodesByStatusAsync(OtherProfile, job.Id, TestContext.Current.CancellationToken));
+        Assert.Equal([Code(1), Code(3)], await fixture.Service.PreviewAsync(DemoProfile, job.Id,
+            new HashSet<string> { "INTRODUCED" }, TestContext.Current.CancellationToken));
+        Assert.Empty(await fixture.Service.PreviewAsync(DemoProfile, job.Id,
+            new HashSet<string>(), TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.PreviewAsync(OtherProfile, job.Id,
+            new HashSet<string> { "INTRODUCED" }, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task PreparedSqlJobDoesNotRunUntilExplicitStart()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -66,16 +146,33 @@ public sealed class BulkCodeFileJobTests
         await fixture.Processor(client).ProcessNextAsync(TestContext.Current.CancellationToken);
         var partial = (await fixture.Service.GetAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken))!;
         Assert.Equal("Partial", partial.State);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.PreviewAsync(DemoProfile, job.Id,
+            new HashSet<string> { "INTRODUCED" }, TestContext.Current.CancellationToken));
         Assert.Equal(1000, partial.CodesCompleted);
         Assert.Equal(1, partial.FailedBatches);
         Assert.Equal(2, client.Requests.Count);
+        Assert.Equal(1000, (await fixture.Service.CountCodesByStatusAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken)).GetValueOrDefault("INTRODUCED"));
 
         await fixture.Service.RetryAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken);
         await fixture.Processor(client).ProcessNextAsync(TestContext.Current.CancellationToken);
         var completed = (await fixture.Service.GetAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken))!;
         Assert.Equal("Completed", completed.State);
         Assert.Equal(1001, completed.CodesCompleted);
+        var preview = new List<string>();
+        FilePageCursor? cursor = null;
+        do
+        {
+            var page = await fixture.Service.PreviewPageAsync(DemoProfile, job.Id,
+                new HashSet<string> { "INTRODUCED" }, cursor, TestContext.Current.CancellationToken);
+            Assert.InRange(page.Items.Count, 1, 100);
+            preview.AddRange(page.Items);
+            cursor = page.NextCursor;
+        } while (cursor is not null);
+        Assert.Equal(codes, preview);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.PreviewPageAsync(Guid.NewGuid(), job.Id,
+            new HashSet<string> { "INTRODUCED" }, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(3, client.Requests.Count);
+        Assert.Equal(1001, (await fixture.Service.CountCodesByStatusAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken)).GetValueOrDefault("INTRODUCED"));
         Assert.All(client.Requests, request => Assert.InRange(JsonSerializer.Deserialize<string[]>(request.Body!)!.Length, 1, 1000));
         Assert.All(client.Requests, request =>
         {

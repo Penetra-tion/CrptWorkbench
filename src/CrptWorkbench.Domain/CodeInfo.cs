@@ -30,6 +30,12 @@ public sealed record CodeInfoPermitDocument
     public int? StatusGroup { get; init; }
 }
 
+public sealed record CodeInfoLicence
+{
+    public string? LicenceNumber { get; init; }
+    public string? LicenceDate { get; init; }
+}
+
 public sealed record CodeInfoPermitRequirementDetails
 {
     public string? NotRequiredReason { get; init; }
@@ -70,6 +76,7 @@ public sealed record CisInfo
     public DateTimeOffset? ExpirationDate { get; init; }
     public IReadOnlyList<CodeInfoExpiration>? Expirations { get; init; }
     public IReadOnlyList<CodeInfoPermitDocument>? CertDoc { get; init; }
+    public IReadOnlyList<CodeInfoLicence>? Licences { get; init; }
     public CodeInfoPermitRequirementDetails? CertDocRequirementDetails { get; init; }
     public IReadOnlyList<string>? Child { get; init; }
     public string? Parent { get; init; }

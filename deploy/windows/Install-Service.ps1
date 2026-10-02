@@ -45,6 +45,15 @@ function Get-ServiceStartName {
     return (Get-CimInstance Win32_Service -Filter "Name='$Name'").StartName
 }
 
+function Get-ExistingServiceEnvironment {
+    param([string]$RegistryPath)
+
+    $properties = Get-ItemProperty -LiteralPath $RegistryPath -ErrorAction Stop
+    $environmentProperty = $properties.PSObject.Properties['Environment']
+    if ($null -eq $environmentProperty) { return @() }
+    return @($environmentProperty.Value)
+}
+
 function Set-ExistingServiceConfiguration {
     param([string]$Name, [string]$Executable)
 
@@ -272,7 +281,7 @@ if ($PSCmdlet.ShouldProcess($resolvedInstallPath, "Install or update $ServiceNam
         }
 
         $serviceRegistryPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
-        $existingEnvironment = Get-ItemPropertyValue -LiteralPath $serviceRegistryPath -Name Environment -ErrorAction SilentlyContinue
+        $existingEnvironment = @(Get-ExistingServiceEnvironment -RegistryPath $serviceRegistryPath)
         $environment = @(Get-WorkbenchServiceEnvironment -Existing $existingEnvironment -Port $Port -DataPath $resolvedDataPath)
         New-ItemProperty -LiteralPath $serviceRegistryPath -Name Environment -PropertyType MultiString -Value $environment -Force | Out-Null
 

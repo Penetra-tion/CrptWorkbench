@@ -19,7 +19,7 @@ public sealed class TraceXImportService(IProfileRepository profiles, ISecretStor
         var connection = await secrets.GetAsync($"profile:{profileId}:tracex:connection-string", cancellationToken);
         if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("Подключение TraceX не настроено.");
         var path = files.CreatePath();
-        var preview = new List<string>(50);
+        var preview = new List<string>(100);
         long count = 0;
         try
         {
@@ -34,7 +34,7 @@ public sealed class TraceXImportService(IProfileRepository profiles, ISecretStor
                     var line = string.Join('\t', normalized);
                     await output.WriteLineAsync(line.AsMemory(), cancellationToken);
                     count++;
-                    if (preview.Count < 50) preview.Add(line);
+                    if (preview.Count < 100) preview.Add(line);
                 }
             }
             if (count == 0) throw new InvalidDataException("Запрос не вернул строк.");
@@ -46,6 +46,26 @@ public sealed class TraceXImportService(IProfileRepository profiles, ISecretStor
         catch (ArgumentException) { files.Delete(path); throw; }
         catch (DbException) { files.Delete(path); throw new InvalidOperationException("Не удалось выполнить запрос к базе TraceX. Проверьте SQL и права чтения."); }
         catch (Exception) { files.Delete(path); throw new InvalidOperationException("Не удалось прочитать данные из базы TraceX."); }
+    }
+
+    public async Task<FileRecordPage> PreviewPageAsync(TraceXImportResult result, Guid profileId,
+        FilePageCursor? cursor = null, CancellationToken cancellationToken = default)
+    {
+        if (result.ProfileId != profileId) throw new InvalidOperationException("Профиль изменился.");
+        var offset = cursor?.ByteOffset ?? 0;
+        if (offset < 0) throw new ArgumentOutOfRangeException(nameof(cursor));
+        await using var source = files.OpenRead(result.Path);
+        source.Position = offset;
+        var reader = new Utf8PositionReader(source, offset);
+        var lines = new List<string>(100);
+        while (true)
+        {
+            var before = reader.Position;
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null) return new(lines, null);
+            if (lines.Count == 100) return new(lines, new(0, before));
+            lines.Add(line);
+        }
     }
 
     public async Task<string> ReadTextAsync(TraceXImportResult result, Guid profileId, long maxBytes,

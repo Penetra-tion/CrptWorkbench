@@ -9,6 +9,7 @@ public interface IProfileRepository
 
 public interface IApiRequestLogRepository
 {
+    Task<RecordPage<ApiRequestLog>> ListPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     Task AddAsync(ApiRequestLog entry, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ApiRequestLog>> ListAsync(Guid profileId, int take, CancellationToken cancellationToken = default);
     Task<ApiRequestLog?> GetAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default);
@@ -63,6 +64,8 @@ public interface ICertificateSignatureService
 
 public interface IPackageDocumentRepository
 {
+    Task<RecordPage<PackageDocument>> ListPageAsync(Guid profileId, PackageOperationKind kind, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    Task<IReadOnlyList<PackageDocument>> GetManyAsync(Guid profileId, PackageOperationKind kind, IReadOnlyList<Guid> ids, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     Task AddAsync(PackageDocument document, CancellationToken cancellationToken = default);
     Task UpdateAsync(PackageDocument document, CancellationToken cancellationToken = default);
     Task<bool> CompleteCheckAsync(PackageDocument document, long leaseUntilUnixMs, CancellationToken cancellationToken = default);
