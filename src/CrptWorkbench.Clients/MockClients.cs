@@ -409,11 +409,32 @@ public sealed class MockNationalCatalogClient : INationalCatalogClient
 
 public sealed class MockSuzClient : ISuzClient
 {
-    public Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
+    public async Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (request.OperationId is "suz.utilisation" or "suz.report-info")
+        {
+            var operationUri = new Uri(new Uri("https://production.suz.mock.invalid/"), request.Url);
+            var omsId = operationUri.Query.TrimStart('?').Split('&').FirstOrDefault(x => x.StartsWith("omsId=", StringComparison.Ordinal))?[6..];
+            string body;
+            if (request.OperationId == "suz.utilisation")
+            {
+                if (request.Method != "POST" || operationUri.AbsolutePath != "/api/v3/utilisation" || !SuzUtilisationRequestRules.ValidBody(request.Body)) throw new ArgumentException("Некорректный отчёт нанесения СУЗ.");
+                var digest = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(operationUri.Query + request.Body));
+                var reportId = new Guid(digest.AsSpan(0, 16));
+                body = JsonSerializer.Serialize(new { omsId, reportId });
+            }
+            else
+            {
+                var reportId = operationUri.Query.TrimStart('?').Split('&').FirstOrDefault(x => x.StartsWith("reportId=", StringComparison.Ordinal))?[9..];
+                if (request.Method != "GET" || request.Body is not null || operationUri.AbsolutePath != "/api/v3/report/info" || !SuzRequestRules.IsGuid(reportId)) throw new ArgumentException("Некорректный запрос статуса нанесения СУЗ.");
+                body = JsonSerializer.Serialize(new { omsId, reportId, resultDocId = reportId, status = "SUCCESS", reportStatus = "SUCCESS" });
+            }
+            var exchange = await MockExchangeFactory.ExecuteAsync(ApiSystem.Suz, request with { Url = "https://production.suz.mock.invalid" + operationUri.PathAndQuery, Body = null, Headers = new Dictionary<string, string>() }, cancellationToken, body);
+            return exchange with { RequestBody = request.OperationId == "suz.utilisation" ? "<body omitted>" : null, RequestHeaders = new Dictionary<string, string> { ["X-Correlation-Id"] = request.CorrelationId, ["clientToken"] = "********", ["X-Signature"] = "********" } };
+        }
         if (request.OperationId != "suz.document-status")
-            return MockExchangeFactory.ExecuteAsync(ApiSystem.Suz, request, cancellationToken);
+            return await MockExchangeFactory.ExecuteAsync(ApiSystem.Suz, request, cancellationToken);
         var uri = new Uri(new Uri("https://production.suz.mock.invalid/"), request.Url);
         var id = uri.Query.TrimStart('?').Split('&').FirstOrDefault(x => x.StartsWith("resultDocId=", StringComparison.Ordinal))?[12..];
         if (request.Method != "GET" || request.Body is not null || uri.AbsolutePath != "/api/v3/receipts/receipt" ||
@@ -429,7 +450,7 @@ public sealed class MockSuzClient : ISuzClient
         if (id != "00000000-0000-0000-0000-000000000006") results.Add(Receipt(id!, state, "REPORT_UTILIZE", 1));
         if (id == "00000000-0000-0000-0000-000000000005") results.Add(Receipt(id, "IN_PROGRESS", "CREATE_ORDER", 2));
         var headers = new Dictionary<string, string>(request.Headers) { ["clientToken"] = "mock-suz-token-not-a-secret" };
-        return MockExchangeFactory.ExecuteAsync(ApiSystem.Suz, request with
+        return await MockExchangeFactory.ExecuteAsync(ApiSystem.Suz, request with
         {
             Url = "https://production.suz.mock.invalid" + uri.PathAndQuery,
             Headers = headers

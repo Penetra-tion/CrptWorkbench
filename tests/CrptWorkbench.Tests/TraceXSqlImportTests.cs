@@ -72,6 +72,14 @@ public sealed class TraceXSqlImportTests
             Assert.Equal("012345678901234567\t000000000000000001", result.Preview[0]);
             Assert.Equal("012345678901234568\t000000000000000002", result.Preview[1]);
             Assert.Contains("012345678901234567\t000000000000000001", await service.ReadTextAsync(result, profile.Id, 1_000_000, TestContext.Current.CancellationToken));
+            var full = await service.ImportAsync(profile.Id, "SELECT code, parent FROM packages", 2,
+                TestContext.Current.CancellationToken, preserveFullCodes: true);
+            Assert.Contains("012345678901234567\u001Dignored", await service.ReadTextAsync(full, profile.Id, long.MaxValue, TestContext.Current.CancellationToken));
+            Assert.False(File.Exists(full.Path));
+            var fullPage = await service.PreviewPageAsync(full, profile.Id, cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Contains("\u001Dignored", fullPage.Items[0]);
+            service.Delete(full);
+            await Assert.ThrowsAsync<FileNotFoundException>(() => service.ReadTextAsync(full, profile.Id, long.MaxValue, TestContext.Current.CancellationToken));
             await Assert.ThrowsAsync<InvalidOperationException>(() => service.ReadTextAsync(result, Guid.NewGuid(), 1_000_000, TestContext.Current.CancellationToken));
             service.Delete(result);
             Assert.False(File.Exists(result.Path));

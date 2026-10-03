@@ -28,6 +28,7 @@
 
   <ItemGroup>
     <None Include="..\..\src\CrptWorkbench.Web\appsettings.json" Link="logging-appsettings.json" CopyToOutputDirectory="Always" />
+    <None Include="Fixtures\suz-codes.xlsx" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
 

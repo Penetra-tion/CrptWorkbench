@@ -342,6 +342,8 @@ public sealed class TraceXAndFavoritesTests
             modelBuilder.Entity<CrptProfile>(entity =>
             {
                 entity.Ignore(x => x.TraceXDatabaseProvider);
+                entity.Ignore(x => x.Kpp);
+                entity.Ignore(x => x.FiasId);
                 entity.Property<string>("NationalCatalogPartyId");
                 entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
                 entity.Property(x => x.Inn).HasMaxLength(12);

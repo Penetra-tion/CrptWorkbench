@@ -11,14 +11,14 @@ public sealed class TraceXImportService(IProfileRepository profiles, ISecretStor
     ITraceXQueryReader reader, ITraceXImportStore files)
 {
     public async Task<TraceXImportResult> ImportAsync(Guid profileId, string query, int columns,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, bool preserveFullCodes = false)
     {
         if (columns is not (1 or 2)) throw new ArgumentOutOfRangeException(nameof(columns));
         var profile = await profiles.GetAsync(profileId, cancellationToken)
             ?? throw new InvalidOperationException("Профиль не найден.");
         var connection = await secrets.GetAsync($"profile:{profileId}:tracex:connection-string", cancellationToken);
         if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("Подключение TraceX не настроено.");
-        var path = files.CreatePath();
+        var path = preserveFullCodes ? files.CreateSensitivePath() : files.CreatePath();
         var preview = new List<string>(100);
         long count = 0;
         try
@@ -28,7 +28,8 @@ public sealed class TraceXImportService(IProfileRepository profiles, ISecretStor
             {
                 await foreach (var values in reader.ReadAsync(profile.TraceXDatabaseProvider, connection, query, columns, cancellationToken))
                 {
-                    var normalized = values.Select(MarkingCodeInput.TrimAfterGroupSeparator).ToArray();
+                    var normalized = preserveFullCodes ? values.Select(x => x.Trim()).ToArray() :
+                        values.Select(MarkingCodeInput.TrimAfterGroupSeparator).ToArray();
                     if (normalized.Any(value => string.IsNullOrWhiteSpace(value) || value.Contains('\t') || value.Contains('\r') || value.Contains('\n')))
                         throw new InvalidDataException($"Строка {count + 1}: пустой код или недопустимый разделитель.");
                     var line = string.Join('\t', normalized);

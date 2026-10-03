@@ -29,6 +29,8 @@ public sealed class ProfileService(
             throw new InputValidationException([new(nameof(profile.CertificateThumbprint), "Выберите сертификат из списка.")]);
         profile.Name = profile.Name.Trim();
         profile.Inn = profile.Inn?.Trim();
+        profile.Kpp = profile.Kpp?.Trim();
+        profile.FiasId = profile.FiasId?.Trim();
         await repository.UpsertAsync(profile, cancellationToken);
     }
 

@@ -22,7 +22,7 @@ public static class OperationNavigation
 
     public static bool IsOperationPath(string path) => path.TrimEnd('/').ToLowerInvariant() is
         "/operations" or "/console" or "/special-features" or "/package-aggregation" or
-        "/package-transformation" or "/code-correction";
+        "/package-transformation" or "/code-correction" or "/suz-utilisation";
 
     public static ConsoleDestination ResolveConsole(string queryString, IReadOnlyList<ApiOperationDescriptor> operations)
     {

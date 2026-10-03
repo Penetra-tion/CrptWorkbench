@@ -1,4 +1,3 @@
-using CrptWorkbench.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
@@ -87,6 +86,8 @@ partial class WorkbenchDbContextModelSnapshot : ModelSnapshot
             b.Property<Guid>("Id").HasColumnType("TEXT");
             b.Property<string>("CertificateThumbprint").HasMaxLength(128).HasColumnType("TEXT");
             b.Property<string>("Inn").HasMaxLength(12).HasColumnType("TEXT");
+            b.Property<string>("Kpp").HasMaxLength(9).HasColumnType("TEXT");
+            b.Property<string>("FiasId").HasMaxLength(36).HasColumnType("TEXT");
             b.Property<string>("Name").IsRequired().HasMaxLength(200).HasColumnType("TEXT");
             b.Property<string>("NationalCatalogProductionBaseUrl").HasColumnType("TEXT");
             b.Property<string>("SuzConnectionId").HasColumnType("TEXT");
@@ -160,6 +161,62 @@ partial class WorkbenchDbContextModelSnapshot : ModelSnapshot
         modelBuilder.Entity("CrptWorkbench.Domain.BulkCodeBatch", b =>
         {
             b.HasOne("CrptWorkbench.Domain.BulkCodeJob", null)
+                .WithMany().HasForeignKey("JobId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+        });
+
+        modelBuilder.Entity("CrptWorkbench.Domain.SuzUtilisationJob", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("TEXT");
+            b.Property<Guid>("ProfileId").HasColumnType("TEXT");
+            b.Property<int>("Mode").HasColumnType("INTEGER");
+            b.Property<string>("ProductGroup").IsRequired().HasColumnType("TEXT");
+            b.Property<string>("PackageType").IsRequired().HasColumnType("TEXT");
+            b.Property<string>("Scenario").IsRequired().HasColumnType("TEXT");
+            b.Property<string>("OmsId").IsRequired().HasColumnType("TEXT");
+            b.Property<string>("ConnectionId").IsRequired().HasColumnType("TEXT");
+            b.Property<string>("BaseUrl").IsRequired().HasColumnType("TEXT");
+            b.Property<string>("CertificateThumbprint").IsRequired().HasColumnType("TEXT");
+            b.Property<string>("CorrelationId").IsRequired().HasColumnType("TEXT");
+            b.Property<int>("CodeCount").HasColumnType("INTEGER");
+            b.Property<int>("ReportCount").HasColumnType("INTEGER");
+            b.Property<long>("CreatedAtUnixMs").HasColumnType("INTEGER");
+            b.Property<Guid?>("SubmissionOwner").HasColumnType("TEXT");
+            b.HasKey("Id");
+            b.HasIndex("ProfileId", "Mode", "CreatedAtUnixMs");
+            b.ToTable("SuzUtilisationJobs");
+        });
+        modelBuilder.Entity("CrptWorkbench.Domain.SuzUtilisationReport", b =>
+        {
+            b.Property<Guid>("Id").HasColumnType("TEXT");
+            b.Property<Guid>("JobId").HasColumnType("TEXT");
+            b.Property<int>("Number").HasColumnType("INTEGER");
+            b.Property<int>("CodeCount").HasColumnType("INTEGER");
+            b.Property<string>("ProtectedPayload").IsRequired().HasColumnType("TEXT");
+            b.Property<string>("State").IsRequired().HasColumnType("TEXT");
+            b.Property<string>("ReportId").HasColumnType("TEXT");
+            b.Property<string>("RemoteStatus").HasColumnType("TEXT");
+            b.Property<string>("ReceiptState").HasColumnType("TEXT");
+            b.Property<string>("Error").HasColumnType("TEXT");
+            b.Property<long?>("SubmittedAtUnixMs").HasColumnType("INTEGER");
+            b.Property<long?>("LastCheckedAtUnixMs").HasColumnType("INTEGER");
+            b.Property<long?>("NextCheckAtUnixMs").HasColumnType("INTEGER");
+            b.Property<long?>("TrackingUntilUnixMs").HasColumnType("INTEGER");
+            b.Property<long?>("LeaseUntilUnixMs").HasColumnType("INTEGER");
+            b.Property<Guid?>("TrackingOwner").HasColumnType("TEXT");
+            b.Property<int>("PollCount").HasColumnType("INTEGER");
+            b.HasKey("Id");
+            b.HasIndex("JobId", "Number").IsUnique();
+            b.HasIndex("NextCheckAtUnixMs");
+            b.ToTable("SuzUtilisationReports");
+        });
+        modelBuilder.Entity("CrptWorkbench.Domain.SuzUtilisationJob", b =>
+        {
+            b.HasOne("CrptWorkbench.Domain.CrptProfile", null)
+                .WithMany().HasForeignKey("ProfileId").OnDelete(DeleteBehavior.Cascade).IsRequired();
+        });
+        modelBuilder.Entity("CrptWorkbench.Domain.SuzUtilisationReport", b =>
+        {
+            b.HasOne("CrptWorkbench.Domain.SuzUtilisationJob", null)
                 .WithMany().HasForeignKey("JobId").OnDelete(DeleteBehavior.Cascade).IsRequired();
         });
 #pragma warning restore 612, 618

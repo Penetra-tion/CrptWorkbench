@@ -55,6 +55,17 @@ public sealed class InputValidationTests
     }
 
     [Fact]
+    public void ProfileChecksBusinessPlaceIdentifiers()
+    {
+        var profile = new CrptProfile { Name = "Valid", Kpp = "123", FiasId = "invalid" };
+        Assert.NotNull(InputValidation.Profile(profile).ErrorFor("Kpp"));
+        Assert.NotNull(InputValidation.Profile(profile).ErrorFor("FiasId"));
+        profile.Kpp = "123456789";
+        profile.FiasId = Guid.NewGuid().ToString();
+        Assert.True(InputValidation.Profile(profile).IsValid);
+    }
+
+    [Fact]
     public void OperationValidatesEveryInputWithoutCheckDigits()
     {
         Assert.True(InputValidation.Operation(NationalCatalogProductHandler.OperationId, new Dictionary<string, string> { ["gtin"] = "00000001" }).IsValid);

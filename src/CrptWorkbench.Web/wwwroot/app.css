@@ -613,3 +613,25 @@ th, td { padding: 11px 10px; border-bottom: 1px solid var(--line); }
     .aggregation-toggle { flex-basis: 28px; width: 28px; min-height: 44px; }
     .aggregation-result .panel-title .button { width: 100%; }
 }
+/* SUZ utilisation uses the shared compact forms and independently expanding lists. */
+.utilisation-page { display: grid; gap: 1rem; }
+.utilisation-page fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.utilisation-field { display: grid; align-content: start; gap: .35rem; min-width: 0; }
+.utilisation-condition { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; }
+.utilisation-condition label { flex: 1; min-width: 8rem; }
+.utilisation-table .code-value { display: block; max-width: 30rem; overflow-wrap: anywhere; white-space: pre-wrap; }
+.utilisation-table input { min-width: 8rem; max-width: 12rem; }
+.utilisation-job { border-top: 1px solid var(--border); padding-top: .75rem; margin-top: .75rem; }
+.utilisation-job-toggle { display: flex; flex-wrap: wrap; text-align: left; align-items: center; gap: .5rem 1rem; width: 100%; background: transparent; color: inherit; border: 0; padding: .75rem .25rem; cursor: pointer; }
+.utilisation-job-toggle strong { flex: 1 1 15rem; }
+.utilisation-job-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.utilisation-report { border-left: 3px solid currentColor; padding: .75rem; margin: .75rem 0; border-radius: .35rem; }
+.utilisation-report-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem; }
+.utilisation-report .code-value { overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .utilisation-page .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .utilisation-page .actions { align-items: stretch; }
+  .utilisation-job-toggle { display: grid; }
+  .utilisation-condition { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .utilisation-table { max-width: 100%; overflow-x: auto; }
+}

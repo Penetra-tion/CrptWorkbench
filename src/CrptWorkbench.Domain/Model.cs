@@ -57,6 +57,8 @@ public sealed class CrptProfile
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
     public string? Inn { get; set; }
+    public string? Kpp { get; set; }
+    public string? FiasId { get; set; }
     public string? CertificateThumbprint { get; set; }
     public string? NationalCatalogProductionBaseUrl { get; set; }
     public string? TrueApiProductionBaseUrl { get; set; }

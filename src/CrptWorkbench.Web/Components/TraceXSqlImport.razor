@@ -48,6 +48,7 @@
     [Parameter] public int Columns { get; set; } = 1;
     [Parameter] public long MaxBytes { get; set; } = 1_000_000;
     [Parameter] public bool Bulk { get; set; }
+    [Parameter] public bool PreserveFullCodes { get; set; }
     [Parameter] public bool Disabled { get; set; }
     [Parameter] public EventCallback<(string Text, bool Append)> OnApply { get; set; }
     [Parameter] public EventCallback OnBulkPrepared { get; set; }
@@ -148,7 +149,7 @@
         await ClearResultAsync();
         try
         {
-            var result = await Imports.ImportAsync(id, _query, Columns, token);
+            var result = await Imports.ImportAsync(id, _query, Columns, token, PreserveFullCodes);
             if (Workbench.ProfileId == id && version == _operationVersion)
             {
                 _result = result;

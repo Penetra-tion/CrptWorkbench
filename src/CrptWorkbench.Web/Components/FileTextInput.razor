@@ -4,10 +4,10 @@
 <div id="@ZoneId" class="file-text-input @(Disabled ? "is-disabled" : null)">
     @ChildContent
     @if (Hint is not null) { <span class="file-text-hint">@Hint</span> }
-    <button id="@(FileId + "-attach")" type="button" class="file-text-attach" title="Выбрать TXT-файл" aria-label="Выбрать TXT-файл" disabled="@Disabled">
+    <button id="@(FileId + "-attach")" type="button" class="file-text-attach" title="@AttachLabel" aria-label="@AttachLabel" disabled="@Disabled">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m20.5 11.5-8.7 8.7a5 5 0 0 1-7.1-7.1l9.2-9.2a3.5 3.5 0 0 1 5 5l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.6-8.6" /></svg>
     </button>
-    <InputFile id="@FileId" OnChange="HandleFileAsync" accept=".txt,text/plain" disabled="@Disabled" tabindex="-1" aria-hidden="true" />
+    <InputFile id="@FileId" OnChange="HandleFileAsync" accept="@Accept" disabled="@Disabled" tabindex="-1" aria-hidden="true" />
 </div>
 @if (_error is not null) { <p class="error-text" role="alert">@_error</p> }
 
@@ -15,6 +15,9 @@
     [Parameter, EditorRequired] public string ZoneId { get; set; } = string.Empty;
     [Parameter, EditorRequired] public string FileId { get; set; } = string.Empty;
     [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string Accept { get; set; } = ".txt,text/plain";
+    [Parameter] public string AttachLabel { get; set; } = "Выбрать TXT-файл";
+    [Parameter] public string MultipleFilesError { get; set; } = "Выберите только один TXT-файл.";
     [Parameter] public string? Hint { get; set; }
     [Parameter] public RenderFragment? ChildContent { get; set; }
     [Parameter] public EventCallback<InputFileChangeEventArgs> OnFileChange { get; set; }
@@ -41,7 +44,7 @@
 
     [JSInvokable] public Task MultipleFiles() => InvokeAsync(() =>
     {
-        _error = "Выберите только один TXT-файл.";
+        _error = MultipleFilesError;
         StateHasChanged();
     });
 

@@ -99,7 +99,7 @@ public sealed class FavoriteApiOperationService(
 {
     public static readonly IReadOnlySet<string> WorkflowIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "package-aggregation", "package-transformation", "code-correction"
+        "package-aggregation", "package-transformation", "code-correction", "suz-utilisation"
     };
 
     public async Task<IReadOnlyList<string>> ListAsync(Guid profileId, CancellationToken cancellationToken = default)

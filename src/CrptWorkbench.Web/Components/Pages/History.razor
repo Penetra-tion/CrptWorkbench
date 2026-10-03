@@ -223,6 +223,8 @@
 
     private string OperationName(string id) => id switch
     {
+        SuzUtilisationService.OperationId => "Нанесение",
+        "suz.report-info" => "Проверка отчёта о нанесении",
         CodeCorrectionService.OperationId => "Корректировка сведений о кодах",
         "true-api.code-info-bulk-file" => "Запрос по кодам + (файл)",
         PackageAggregationService.OperationId => "Формирование упаковки",

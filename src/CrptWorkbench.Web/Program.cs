@@ -45,6 +45,7 @@ try
 
     var dataDirectory = integrationOptions.DataDirectory!;
     Directory.CreateDirectory(dataDirectory);
+    using var instanceLock = new FileStream(Path.Combine(dataDirectory, "workbench.instance.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
     var keysDirectory = Path.Combine(dataDirectory, "keys");
     Directory.CreateDirectory(keysDirectory);
     var dataProtection = builder.Services.AddDataProtection()
@@ -59,6 +60,8 @@ try
     builder.Services.AddScoped<IProfileRepository, ProfileRepository>();
     builder.Services.AddScoped<IApiRequestLogRepository, ApiRequestLogRepository>();
     builder.Services.AddScoped<IPackageDocumentRepository, PackageDocumentRepository>();
+    builder.Services.AddScoped<ISuzUtilisationRepository, SuzUtilisationRepository>();
+    builder.Services.AddScoped<ISuzCodeSpreadsheetReader, SuzCodeSpreadsheetReader>();
     builder.Services.AddScoped<IBulkCodeJobRepository, BulkCodeJobRepository>();
     builder.Services.AddSingleton<IBulkCodeFileStore>(new BulkCodeFileStore(dataDirectory));
     builder.Services.AddSingleton(integrationOptions);
@@ -107,10 +110,15 @@ try
     builder.Services.AddScoped<CodeCorrectionService>();
     builder.Services.AddScoped<PackageTransformationService>();
     builder.Services.AddScoped<PackageDocumentTracker>();
+    builder.Services.AddScoped<Func<CrptIntegrationMode>>(services => () => services.GetRequiredService<CrptIntegrationOptions>().Mode);
+    builder.Services.AddScoped<Func<CrptAuthenticationMode>>(services => () => services.GetRequiredService<CrptIntegrationOptions>().SuzAuthMode);
+    builder.Services.AddScoped<SuzUtilisationService>();
+    builder.Services.AddScoped<SuzUtilisationTracker>();
     builder.Services.AddScoped<BulkCodeFileService>();
     builder.Services.AddScoped<BulkCodeJobProcessor>();
     builder.Services.AddSingleton<BulkCodeDownloadTickets>();
     builder.Services.AddHostedService<PackageDocumentWorker>();
+    builder.Services.AddHostedService<SuzUtilisationWorker>();
     builder.Services.AddHostedService<BulkCodeJobWorker>();
     builder.Services.AddScoped<WorkbenchContext>();
     builder.Services.AddScoped<ProductionReadinessService>();

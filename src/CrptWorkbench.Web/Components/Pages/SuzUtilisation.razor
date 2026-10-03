@@ -1,0 +1,182 @@
+@page "/suz-utilisation"
+@implements IAsyncDisposable
+@inject SuzUtilisationService Utilisation
+@inject FavoriteProductGroupService FavoriteGroups
+@inject WorkbenchContext Workbench
+@inject IJSRuntime JavaScript
+@inject IOptions<CrptIntegrationOptions> IntegrationOptions
+
+<PageTitle>Нанесение — CRPT Workbench</PageTitle>
+<a class="operations-back" href="/operations"><span aria-hidden="true">←</span><span>Все операции</span></a>
+<div class="page-heading"><div><span class="eyebrow">СУЗ</span><h1>Нанесение</h1></div></div>
+<div class="utilisation-page">
+@if (_message is not null) { <p class="notice" role="status">@_message</p> }
+<section class="panel">
+    <h2>Параметры отчёта</h2>
+    <p class="muted">Одна товарная группа и один тип упаковки на загрузку. Большие списки разделяются на отчёты до 30 000 кодов.</p>
+    <fieldset disabled="@_busy">
+        <div class="form-grid">
+            <div class="product-group-field">
+                <span class="product-group-head">
+                    <label for="utilisation-group">Товарная группа</label>
+                    <span class="package-group-filter" role="group" aria-label="Фильтр товарных групп">
+                        <button type="button" class="@(!_favoriteGroupsOnly ? "active" : null)" @onclick="() => SetFavoriteFilterAsync(false)">Все</button>
+                        <button type="button" class="@(_favoriteGroupsOnly ? "active" : null)" disabled="@(_favorites.Count == 0)" @onclick="() => SetFavoriteFilterAsync(true)">Избранные</button>
+                    </span>
+                </span>
+                <div class="product-group-picker">
+                    <select id="utilisation-group" @bind="_group" @bind:after="GroupChanged">
+                        @foreach (var group in VisibleGroups) { <option value="@group.Code">@group.Name</option> }
+                    </select>
+                    <button type="button" class="favorite-toggle product-group-favorite @(IsFavorite ? "active" : null)" disabled="@(Workbench.ProfileId is null || _savingFavorite)" @onclick="ToggleFavoriteAsync" aria-label="@(IsFavorite ? "Удалить товарную группу из избранного" : "Добавить товарную группу в избранное")" title="@(IsFavorite ? "Удалить из избранного" : "Добавить в избранное")">@(IsFavorite ? "★" : "☆")</button>
+                </div>
+            </div>
+            @if (!SelectedGroup.Automatic)
+            {
+                <label for="utilisation-package">Тип упаковки<select id="utilisation-package" @bind="_packageType" @bind:after="ContextChanged">@foreach (var type in SuzUtilisationRules.PackageTypes(_group)) { <option value="@type.Code">@type.Name</option> }</select></label>
+                <label for="utilisation-scenario">Сценарий нанесения<select id="utilisation-scenario" @bind="_scenario" @bind:after="ContextChanged">@foreach (var scenario in SuzUtilisationRules.Scenarios(_group)) { <option value="@scenario.Code">@scenario.Name</option> }</select></label>
+            }
+        </div>
+        <p class="notice">@SelectedGroup.Help</p>
+        @if (!SelectedGroup.Automatic)
+        {
+            <div class="form-grid utilisation-fields">
+                @foreach (var field in CommonFields)
+                {
+                    var inputId = "utilisation-" + field.Code;
+                    <div class="utilisation-field" @key="field.Code">
+                        <label for="@inputId">@field.Name @(field.Required ? "*" : "")</label>
+                        @if (field.Code == "expDateConditions")
+                        {
+                            @foreach (var condition in _conditions)
+                            {
+                                <div class="utilisation-condition" @key="condition">
+                                    <label>Индекс условия<input type="number" min="0" value="@condition.Index" @onchange="e => SetConditionIndex(condition, e)" /></label>
+                                    <label>Годен до<input type="date" value="@condition.Date" @onchange="e => SetConditionDate(condition, e)" /></label>
+                                    <button type="button" class="button ghost" aria-label="Удалить условие хранения" @onclick="() => RemoveCondition(condition)">Удалить</button>
+                                </div>
+                            }
+                            <button id="@inputId" type="button" class="button ghost" @onclick="AddCondition">Добавить срок годности</button>
+                        }
+                        else if (field.InputType == "select")
+                        {
+                            <select id="@inputId" value="@CommonValue(field.Code)" @onchange="e => SetCommon(field.Code, e)">
+                                <option value="">Не указано</option>
+                                @foreach (var option in field.Options ?? []) { <option value="@option.Code">@option.Name</option> }
+                            </select>
+                        }
+                        else if (field.InputType == "textarea")
+                        {
+                            <textarea id="@inputId" rows="3" value="@CommonValue(field.Code)" @onchange="e => SetCommon(field.Code, e)"></textarea>
+                        }
+                        else
+                        {
+                            <input id="@inputId" type="@field.InputType" value="@CommonValue(field.Code)" @onchange="e => SetCommon(field.Code, e)" />
+                        }
+                        @if (!string.IsNullOrWhiteSpace(field.Help)) { <small class="muted">@field.Help</small> }
+                    </div>
+                }
+            </div>
+        }
+    </fieldset>
+</section>
+@if (!SelectedGroup.Automatic)
+{
+<section class="panel">
+    <h2>Коды и индивидуальные сведения</h2>
+    <p class="muted">Полный код маркировки с кодом проверки, один на строку. Разделители GS и криптохвост сохраняются. Можно загрузить TXT, CSV или XLSX; из таблицы читается первый столбец.</p>
+    @if (_scenario != "UTILISATION")
+    {
+        <p class="notice">В каждой строке укажите новый полный код, разделитель <code>\u001E</code> и исходный код. Для пересорта исходный код тоже полный; в остальных сценариях — без кода проверки. Записи <code>\u001D</code> и <code>\u001E</code> преобразуются в разделители автоматически.</p>
+    }
+    @if (IntegrationOptions.Value.Mode == CrptIntegrationMode.Mock && _group == "milk" && _packageType == "UNIT")
+    {
+        <details class="mock-example"><summary>Тестовые данные для Mock</summary><p class="muted">Заполнить молочную продукцию, дату производства и срок годности.</p><button type="button" class="button ghost" disabled="@_busy" @onclick="UseMockExampleAsync">Заполнить пример</button></details>
+    }
+    <label for="utilisation-text">Список полных кодов</label>
+    <FileTextInput ZoneId="utilisation-file-drop" FileId="utilisation-file" Disabled="@_busy" Accept=".txt,.csv,.xlsx" AttachLabel="Выбрать TXT, CSV или XLSX" MultipleFilesError="Выберите только один файл." OnFileChange="ReadFileAsync">
+        <textarea id="utilisation-text" rows="6" disabled="@_busy" spellcheck="false" placeholder="Полный код на строку"></textarea>
+    </FileTextInput>
+    <div class="actions">
+        <button type="button" class="button ghost" disabled="@_busy" @onclick="ReadTextAsync">Загрузить список</button>
+        <button type="button" class="button ghost" disabled="@_busy" @onclick="DownloadTemplateAsync">Скачать шаблон CSV</button>
+        <TraceXSqlImport Columns="1" MaxBytes="@long.MaxValue" PreserveFullCodes="true" Disabled="@_busy" OnApply="ApplyTraceXAsync" />
+    </div>
+    @if (_rows.Count > 0)
+    {
+        <p role="status">Загружено строк: @_rows.Count. Общие сведения задаются выше; индивидуальные — у соответствующего кода.</p>
+        <div class="table-wrap utilisation-table">
+            <table><thead><tr><th scope="col">№</th><th scope="col">Полный код</th>@foreach (var field in IndividualFields) { <th scope="col">@field.Name</th> }<th scope="col">Проверка</th><th scope="col">Действие</th></tr></thead>
+            <tbody>
+            @for (var i = 0; i < Math.Min(_visibleRows, _rows.Count); i++)
+            {
+                var number = i + 1;
+                var row = _rows[i];
+                <tr @key="row">
+                    <td>@number</td><td><span class="code-value">@DisplayCode(row.Code)</span></td>
+                    @foreach (var field in IndividualFields)
+                    {
+                        <td><input aria-label="@(field.Name + ", строка " + number)" title="@field.Help" disabled="@_busy" value="@row.Values.GetValueOrDefault(field.Code)" @onchange="e => SetIndividual(row, field.Code, e)" /></td>
+                    }
+                    <td>@if (_preparation is null) { <span class="muted">Не проверен</span> } else if (RowErrors(number).Count > 0) { <span class="error-text">@string.Join(" ", RowErrors(number))</span> } else { <span class="tone-success">Проверен</span> }</td>
+                    <td><button type="button" class="button ghost" disabled="@_busy" aria-label="@("Удалить строку " + number)" @onclick="() => RemoveRow(row)">Удалить</button></td>
+                </tr>
+            }
+            </tbody></table>
+        </div>
+        <ShowMore VisibleCount="@Math.Min(_visibleRows, _rows.Count)" TotalCount="@_rows.Count" HasMore="@(_visibleRows < _rows.Count)" Disabled="@_busy" OnMore="() => _visibleRows += 100" />
+    }
+    @if (_preparation is { } preparation)
+    {
+        @foreach (var error in preparation.Errors.Where(x => x.RowNumber is null)) { <p class="error-text" role="alert">@error.Message</p> }
+        @if (preparation.Errors.Any(x => x.RowNumber is null && x.Field is "kpp" or "fiasId")) { <p><a href="/settings">Заполнить КПП или ФИАС в профиле</a></p> }
+        @if (preparation.IsValid) { <p class="notice" role="status">Готово к отправке: @preparation.CodeCount кодов, @preparation.Reports.Count отчётов. Каждый отчёт получит отдельный GUID.</p> }
+        else { <p class="notice error" role="alert">Исправьте сведения или удалите строки с ошибками перед отправкой.</p> }
+    }
+    <div class="actions">
+        <button type="button" class="button ghost" disabled="@(_busy || _rows.Count == 0)" @onclick="Prepare">Проверить и подготовить</button>
+        <button type="button" class="button primary" disabled="@(_busy || _preparation?.IsValid != true || Workbench.ProfileId is null)" @onclick="SubmitAsync">@(IntegrationOptions.Value.Mode == CrptIntegrationMode.Mock ? "Отправить в Mock" : "Подписать и отправить в СУЗ")</button>
+        @if (_busy) { <button type="button" class="button ghost" @onclick="Cancel">Остановить</button> }
+    </div>
+</section>
+}
+<section class="panel">
+    <div class="panel-title"><h2>Отчёты о нанесении</h2><button type="button" class="button ghost" disabled="@(_loadingJobs || _busy)" @onclick="ReloadJobsAsync">Обновить</button></div>
+    @if (_jobs.Count == 0) { <p class="muted">У выбранного профиля пока нет заданий нанесения в текущем режиме.</p> }
+    @foreach (var job in _jobs)
+    {
+        <article class="utilisation-job" @key="job.Id">
+            <button type="button" class="utilisation-job-toggle" aria-expanded="@(_details?.Job.Id == job.Id)" @onclick="() => OpenJobAsync(job.Id)">
+                <strong>@GroupName(job.ProductGroup)</strong><span>@Date(job.CreatedAtUnixMs)</span><span>@job.CodeCount кодов · @job.ReportCount отчётов · @PackageName(job.PackageType)</span>
+            </button>
+            @if (_details is { } details && details.Job.Id == job.Id)
+            {
+                <p role="status">@Overall(details)</p>
+                @if (details.Reports.Any(x => x.State == "Prepared")) { <button type="button" class="button ghost" disabled="@_busy" @onclick="() => ContinueAsync(job.Id)">Отправить оставшиеся части</button> }
+                @foreach (var report in details.Reports.Take(_visibleReports))
+                {
+                    <div class="utilisation-report @ReportTone(report)">
+                        <div class="utilisation-report-heading"><strong>Отчёт @report.Number · @report.CodeCount кодов</strong><span role="status">@ReportStatus(report)</span></div>
+                        @if (report.ReportId is not null) { <p class="code-value">GUID: @report.ReportId</p> }
+                        @if (report.ReceiptState is not null) { <p>Квитанция: @SuzDocumentStatusResults.Status(report.ReceiptState)</p> }
+                        @if (!string.IsNullOrWhiteSpace(report.Error)) { <p class="error-text">@report.Error</p> }
+                        @if (report.State == "Unknown") { <p class="notice">Исход отправки неизвестен. Проверьте отчёт в СУЗ вручную перед новой подачей этих кодов.</p> }
+                        @if (report.ReportId is not null)
+                        {
+                            <div class="actions">
+                                @if (report.State is "Tracking" or "Paused")
+                                {
+                                    <button type="button" class="button ghost" disabled="@_busy" @onclick="() => ScheduleReportAsync(report)">@(report.State == "Paused" ? "Возобновить отслеживание" : "Проверить сейчас")</button>
+                                }
+                                <a class="button ghost" href="@ReceiptUrl(report.ReportId)">Открыть квитанции</a>
+                            </div>
+                        }
+                    </div>
+                }
+                <ShowMore VisibleCount="@Math.Min(_visibleReports, details.Reports.Count)" TotalCount="@details.Reports.Count" HasMore="@(_visibleReports < details.Reports.Count)" OnMore="() => _visibleReports += 100" />
+            }
+        </article>
+    }
+    <ShowMore VisibleCount="@_jobs.Count" TotalCount="@_jobTotal" HasMore="@(_jobCursor is not null)" Loading="@_loadingJobs" Disabled="@_busy" OnMore="LoadMoreJobsAsync" />
+</section>
+</div>

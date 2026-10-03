@@ -26,6 +26,7 @@
             <section class="panel form-section">
                 <div class="panel-title"><div><span class="eyebrow">Профиль</span><h2>Организация</h2></div></div>
                 <div class="form-grid organization-fields"><label>Название<input @bind="_profile.Name" maxlength="200" />@FieldError(nameof(CrptProfile.Name))</label><label>ИНН<input @bind="_profile.Inn" maxlength="12" inputmode="numeric" />@FieldError(nameof(CrptProfile.Inn))</label></div>
+                <div class="form-grid organization-fields"><label>КПП места деятельности<input @bind="_profile.Kpp" maxlength="9" inputmode="numeric" />@FieldError(nameof(CrptProfile.Kpp))</label><label>Идентификатор ФИАС<input @bind="_profile.FiasId" maxlength="36" />@FieldError(nameof(CrptProfile.FiasId))</label></div>
             </section>
 
             <section class="panel form-section">
@@ -451,7 +452,7 @@
 
     private static CrptProfile CopyProfile(CrptProfile profile) => new()
     {
-        Id = profile.Id, Name = profile.Name, Inn = profile.Inn,
+        Id = profile.Id, Name = profile.Name, Inn = profile.Inn, Kpp = profile.Kpp, FiasId = profile.FiasId,
         CertificateThumbprint = profile.CertificateThumbprint,
         NationalCatalogProductionBaseUrl = profile.NationalCatalogProductionBaseUrl,
         TrueApiProductionBaseUrl = profile.TrueApiProductionBaseUrl,

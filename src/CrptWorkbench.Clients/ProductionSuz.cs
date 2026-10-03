@@ -42,11 +42,12 @@ internal static class SuzRequestRules
 
 public sealed class ProductionSuzNetworkGuardHandler : DelegatingHandler
 {
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        if (request.Method != HttpMethod.Get || request.Content is not null || request.RequestUri is not { } uri || !SuzRequestRules.IsReceipt(uri))
+        if (request.RequestUri is not { } uri || !(request.Method == HttpMethod.Get && request.Content is null && (SuzRequestRules.IsReceipt(uri) || SuzUtilisationRequestRules.IsReport(uri)) ||
+            request.Method == HttpMethod.Post && SuzUtilisationRequestRules.IsCreation(uri) && request.Content is not null && request.Headers.TryGetValues("X-Signature", out var signatures) && signatures.Count() == 1 && !string.IsNullOrWhiteSpace(signatures.Single()) && SuzUtilisationRequestRules.ValidBody(await request.Content.ReadAsStringAsync(cancellationToken))))
             throw new InvalidOperationException("Запрос выходит за разрешённые границы API СУЗ.");
-        return base.SendAsync(request, cancellationToken);
+        return await base.SendAsync(request, cancellationToken);
     }
 }
 
@@ -71,7 +72,7 @@ public sealed class SuzSafeLoggingHandler(ILogger<SuzSafeLoggingHandler> logger)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = request.Headers.TryGetValues("X-Correlation-Id", out var ids) ? ids.First() : string.Empty });
         var started = Stopwatch.GetTimestamp();
-        var endpoint = request.RequestUri?.AbsolutePath == "/api/v3/receipts/receipt" ? "SUZ receipts" : "SUZ authentication";
+        var endpoint = request.RequestUri?.AbsolutePath switch { "/api/v3/receipts/receipt" => "SUZ receipts", "/api/v3/utilisation" => "SUZ utilisation", "/api/v3/report/info" => "SUZ report info", _ => "SUZ authentication" };
         logger.LogInformation("Outgoing {Method} {Endpoint}", request.Method.Method, endpoint);
         try
         {
@@ -170,14 +171,15 @@ public sealed class RealSuzClient(IHttpClientFactory httpClientFactory, ISuzToke
         var connection = request.SuzConnection ?? throw new InvalidOperationException("Не указано подключение СУЗ.");
         SuzRequestRules.ValidateConnection(connection, options.Value.SuzAuthMode == CrptAuthenticationMode.Auto);
         var uri = new Uri(new Uri(SuzRequestRules.BaseUrl + "/"), request.Url);
-        if (request.OperationId != "suz.document-status" || request.Method != "GET" || request.Body is not null ||
-            !SuzRequestRules.IsReceipt(uri) || uri.Query.Split('&')[0] != "?omsId=" + connection.OmsId)
-            throw new InvalidOperationException("Разрешён только запрос квитанций документа СУЗ.");
+        var creation = request.OperationId == "suz.utilisation" && request.Method == "POST" && SuzUtilisationRequestRules.IsCreation(uri) && SuzUtilisationRequestRules.ValidBody(request.Body) && request.Headers.TryGetValue("X-Signature", out var signature) && !string.IsNullOrWhiteSpace(signature) && !signature.Any(char.IsControl);
+        var read = request.Method == "GET" && request.Body is null && (request.OperationId == "suz.document-status" && SuzRequestRules.IsReceipt(uri) || request.OperationId == "suz.report-info" && SuzUtilisationRequestRules.IsReport(uri));
+        if (!(creation || read) || uri.Query.Split('&')[0] != "?omsId=" + connection.OmsId)
+            throw new InvalidOperationException("Запрос выходит за разрешённые границы API СУЗ.");
         var auth = request.Authentication ?? throw new InvalidOperationException("Не указан профиль авторизации СУЗ.");
         var watch = Stopwatch.StartNew();
         var token = await tokens.GetTokenAsync(auth, connection, request.CorrelationId, cancellationToken);
         var exchange = await SendAsync(uri, request, token, cancellationToken);
-        if (exchange.StatusCode == 401 && options.Value.SuzAuthMode == CrptAuthenticationMode.Auto)
+        if (request.Method == "GET" && exchange.StatusCode == 401 && options.Value.SuzAuthMode == CrptAuthenticationMode.Auto)
         {
             tokens.Invalidate(auth, connection, token);
             token = await tokens.GetTokenAsync(auth, connection, request.CorrelationId, cancellationToken);
@@ -189,15 +191,23 @@ public sealed class RealSuzClient(IHttpClientFactory httpClientFactory, ISuzToke
     {
         try
         {
-        using var message = new HttpRequestMessage(HttpMethod.Get, uri);
+        var utilisation = request.OperationId == "suz.utilisation";
+        using var message = new HttpRequestMessage(new HttpMethod(request.Method), uri);
+        if (utilisation)
+        {
+            message.Content = new StringContent(request.Body!, Encoding.UTF8, "application/json");
+            message.Headers.Add("X-Signature", request.Headers["X-Signature"]);
+        }
         message.Headers.Add("clientToken", token);
         message.Headers.Add("X-Correlation-Id", request.CorrelationId);
         message.Headers.Accept.ParseAdd("application/json");
         using var response = await httpClientFactory.CreateClient(HttpClientNames.SuzProduction).SendAsync(message, ct);
-        return new((int)response.StatusCode, "GET", uri.AbsoluteUri,
-            new Dictionary<string, string> { ["clientToken"] = "********", ["X-Correlation-Id"] = request.CorrelationId, ["Accept"] = "application/json" }, null,
-            response.Headers.Concat(response.Content.Headers).ToDictionary(x => x.Key, x => string.Join(", ", x.Value), StringComparer.OrdinalIgnoreCase),
-            await response.Content.ReadAsStringAsync(ct), TimeSpan.Zero);
+        var safeHeaders = new Dictionary<string, string> { ["clientToken"] = "********", ["X-Correlation-Id"] = request.CorrelationId, ["Accept"] = "application/json" };
+        if (utilisation) safeHeaders["X-Signature"] = "********";
+        var body = await response.Content.ReadAsStringAsync(ct);
+        return new((int)response.StatusCode, request.Method, uri.AbsoluteUri, safeHeaders, utilisation ? "<body omitted>" : null,
+            request.OperationId is "suz.utilisation" or "suz.report-info" ? new Dictionary<string, string> { ["Content-Type"] = "application/json" } : response.Headers.Concat(response.Content.Headers).ToDictionary(x => x.Key, x => string.Join(", ", x.Value), StringComparer.OrdinalIgnoreCase),
+            request.OperationId is "suz.utilisation" or "suz.report-info" ? SuzUtilisationRequestRules.SafeResponse(body) : body, TimeSpan.Zero);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (OperationCanceledException) { throw new InvalidOperationException("Превышено время ожидания ответа СУЗ."); }

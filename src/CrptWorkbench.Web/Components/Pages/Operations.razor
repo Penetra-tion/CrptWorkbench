@@ -45,7 +45,7 @@
 @code {
     private sealed record CatalogItem(string Id, ApiSystem System, int Category, string Name, string Description, string Url);
     private static readonly ApiSystem[] SystemOrder = [ApiSystem.TrueApi, ApiSystem.Suz, ApiSystem.NationalCatalog, ApiSystem.Mercury, ApiSystem.PermitDocuments];
-    private static readonly int[] CategoryOrder = [0, 1, 2];
+    private static readonly int[] CategoryOrder = [0, 1, 2, 3];
     private IReadOnlyList<CatalogItem> Catalog = [];
     private readonly HashSet<string> _favoriteIds = new(StringComparer.OrdinalIgnoreCase);
     private ApiSystem _system = ApiSystem.TrueApi;
@@ -58,7 +58,8 @@
             .Concat([
                 new("package-aggregation", ApiSystem.TrueApi, 1, "Формирование упаковок", "Объединение готовых кодов в упаковки и наборы с отслеживанием документов.", "/package-aggregation"),
                 new("package-transformation", ApiSystem.TrueApi, 1, "Трансформация упаковок", "Добавление или изъятие кодов из упаковок с отслеживанием документов.", "/package-transformation"),
-                new("code-correction", ApiSystem.TrueApi, 2, "Корректировка сведений о кодах", "Изменение сведений с проверкой кодов и отслеживанием отправленного документа.", "/code-correction")
+                new("code-correction", ApiSystem.TrueApi, 2, "Корректировка сведений о кодах", "Изменение сведений с проверкой кодов и отслеживанием отправленного документа.", "/code-correction"),
+                new("suz-utilisation", ApiSystem.Suz, 3, "Нанесение", "Отчёт о нанесении кодов с учётом товарной группы и типа упаковки.", "/suz-utilisation")
             ]).ToArray();
         Workbench.ProfileChanged += OnProfileChanged;
         await LoadFavoritesAsync();
@@ -111,7 +112,7 @@
     });
 
     public void Dispose() => Workbench.ProfileChanged -= OnProfileChanged;
-    private static string CategoryName(int category) => category switch { 1 => "Упаковки", 2 => "Корректировка", _ => "Получение сведений" };
+    private static string CategoryName(int category) => category switch { 1 => "Упаковки", 2 => "Корректировка", 3 => "Нанесение", _ => "Получение сведений" };
     private static string SystemName(ApiSystem system) => system switch
     {
         ApiSystem.TrueApi => "True API", ApiSystem.NationalCatalog => "Национальный каталог",

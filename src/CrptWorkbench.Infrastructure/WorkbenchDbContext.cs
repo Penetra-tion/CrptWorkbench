@@ -20,13 +20,59 @@ public sealed class WorkbenchDbContext(DbContextOptions<WorkbenchDbContext> opti
     public DbSet<BulkCodeJob> BulkCodeJobs => Set<BulkCodeJob>();
     public DbSet<BulkCodeBatch> BulkCodeBatches => Set<BulkCodeBatch>();
 
+    public DbSet<SuzUtilisationJob> SuzUtilisationJobs => Set<SuzUtilisationJob>();
+    public DbSet<SuzUtilisationReport> SuzUtilisationReports => Set<SuzUtilisationReport>();
+
+    internal static void ConfigureSuzUtilisation(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<SuzUtilisationJob>(entity =>
+        {
+            entity.ToTable("SuzUtilisationJobs");
+            entity.Property(x => x.Id).HasColumnType("TEXT");
+            entity.Property(x => x.ProfileId).HasColumnType("TEXT");
+            entity.Property(x => x.Mode).HasColumnType("INTEGER");
+            foreach (var name in new[] { nameof(SuzUtilisationJob.ProductGroup), nameof(SuzUtilisationJob.PackageType), nameof(SuzUtilisationJob.Scenario), nameof(SuzUtilisationJob.OmsId), nameof(SuzUtilisationJob.ConnectionId), nameof(SuzUtilisationJob.BaseUrl), nameof(SuzUtilisationJob.CertificateThumbprint), nameof(SuzUtilisationJob.CorrelationId) })
+                entity.Property<string>(name).IsRequired().HasColumnType("TEXT");
+            entity.Property(x => x.CodeCount).HasColumnType("INTEGER");
+            entity.Property(x => x.ReportCount).HasColumnType("INTEGER");
+            entity.Property(x => x.CreatedAtUnixMs).HasColumnType("INTEGER");
+            entity.Property(x => x.SubmissionOwner).HasColumnType("TEXT");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.ProfileId, x.Mode, x.CreatedAtUnixMs });
+            entity.HasOne<CrptProfile>().WithMany().HasForeignKey(x => x.ProfileId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<SuzUtilisationReport>(entity =>
+        {
+            entity.ToTable("SuzUtilisationReports");
+            entity.Property(x => x.Id).HasColumnType("TEXT");
+            entity.Property(x => x.JobId).HasColumnType("TEXT");
+            entity.Property(x => x.Number).HasColumnType("INTEGER");
+            entity.Property(x => x.CodeCount).HasColumnType("INTEGER");
+            entity.Property(x => x.ProtectedPayload).IsRequired().HasColumnType("TEXT");
+            entity.Property(x => x.State).IsRequired().HasColumnType("TEXT");
+            foreach (var name in new[] { nameof(SuzUtilisationReport.ReportId), nameof(SuzUtilisationReport.RemoteStatus), nameof(SuzUtilisationReport.ReceiptState), nameof(SuzUtilisationReport.Error) })
+                entity.Property<string?>(name).HasColumnType("TEXT");
+            foreach (var name in new[] { nameof(SuzUtilisationReport.SubmittedAtUnixMs), nameof(SuzUtilisationReport.LastCheckedAtUnixMs), nameof(SuzUtilisationReport.NextCheckAtUnixMs), nameof(SuzUtilisationReport.TrackingUntilUnixMs), nameof(SuzUtilisationReport.LeaseUntilUnixMs) })
+                entity.Property<long?>(name).HasColumnType("INTEGER");
+            entity.Property(x => x.TrackingOwner).HasColumnType("TEXT");
+            entity.Property(x => x.PollCount).HasColumnType("INTEGER");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.JobId, x.Number }).IsUnique();
+            entity.HasIndex(x => x.NextCheckAtUnixMs);
+            entity.HasOne<SuzUtilisationJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        ConfigureSuzUtilisation(modelBuilder);
         modelBuilder.Entity<CrptProfile>(entity =>
         {
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Inn).HasMaxLength(12);
+            entity.Property(x => x.Kpp).HasMaxLength(9);
+            entity.Property(x => x.FiasId).HasMaxLength(36);
             entity.Property(x => x.CertificateThumbprint).HasMaxLength(128);
             entity.Property(x => x.TraceXDatabaseProvider).HasConversion<string>().HasMaxLength(32);
         });

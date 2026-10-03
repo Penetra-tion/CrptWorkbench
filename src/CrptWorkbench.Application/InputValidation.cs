@@ -15,6 +15,13 @@ public static class InputValidation
         if (!string.IsNullOrEmpty(inn) && (inn.Length is not (10 or 12) || inn.Any(c => !char.IsAsciiDigit(c))))
             issues.Add(new(nameof(profile.Inn), "ИНН должен содержать 10 или 12 цифр."));
 
+        var kpp = profile.Kpp?.Trim();
+        if (!string.IsNullOrEmpty(kpp) && (kpp.Length != 9 || kpp.Any(c => !char.IsAsciiDigit(c))))
+            issues.Add(new(nameof(profile.Kpp), "КПП должен содержать 9 цифр."));
+        var fias = profile.FiasId?.Trim();
+        if (!string.IsNullOrEmpty(fias) && (!Guid.TryParseExact(fias, "D", out _) || fias.Length != 36))
+            issues.Add(new(nameof(profile.FiasId), "ФИАС должен быть GUID в формате 00000000-0000-0000-0000-000000000000."));
+
         CheckUrl(profile.NationalCatalogProductionBaseUrl, nameof(profile.NationalCatalogProductionBaseUrl), "Mock Base URL Национального каталога", issues);
         CheckUrl(profile.SuzProductionBaseUrl, nameof(profile.SuzProductionBaseUrl), "Base URL СУЗ", issues);
         CheckUrl(profile.TrueApiProductionBaseUrl, nameof(profile.TrueApiProductionBaseUrl), "Base URL True API", issues);
