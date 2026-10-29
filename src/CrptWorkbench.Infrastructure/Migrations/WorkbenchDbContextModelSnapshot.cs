@@ -13,6 +13,47 @@ partial class WorkbenchDbContextModelSnapshot : ModelSnapshot
     {
 #pragma warning disable 612, 618
         modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
+        modelBuilder.Entity("CrptWorkbench.Infrastructure.BulkShipmentCheck", b =>
+        {
+            b.Property<Guid>("ProfileId").HasColumnType("TEXT");
+            b.Property<Guid>("JobId").HasColumnType("TEXT");
+            b.Property<int>("Mode").HasColumnType("INTEGER");
+            b.Property<string>("Inn").HasMaxLength(12).HasColumnType("TEXT");
+            b.Property<string>("Code").HasMaxLength(74).HasColumnType("TEXT");
+            b.Property<int>("State").HasColumnType("INTEGER");
+            b.Property<DateTimeOffset?>("CheckedAt").HasColumnType("TEXT");
+            b.Property<string>("Reason").HasMaxLength(256).HasColumnType("TEXT");
+            b.HasKey("ProfileId", "JobId", "Mode", "Inn", "Code");
+            b.HasIndex("JobId");
+            b.ToTable("BulkShipmentChecks");
+        });
+        modelBuilder.Entity("CrptWorkbench.Infrastructure.BulkShipmentCheckProgressEntity", b =>
+        {
+            b.Property<Guid>("ProfileId").HasColumnType("TEXT");
+            b.Property<Guid>("JobId").HasColumnType("TEXT");
+            b.Property<int>("Mode").HasColumnType("INTEGER");
+            b.Property<string>("Inn").HasMaxLength(12).HasColumnType("TEXT");
+            b.Property<long>("NextBatchNumber").HasColumnType("INTEGER");
+            b.Property<long>("ByteOffset").HasColumnType("INTEGER");
+            b.Property<bool>("Completed").HasColumnType("INTEGER");
+            b.Property<long>("ReviewedRows").HasColumnType("INTEGER");
+            b.HasKey("ProfileId", "JobId", "Mode", "Inn");
+            b.HasIndex("JobId");
+            b.ToTable("BulkShipmentCheckProgresses");
+        });
+        modelBuilder.Entity("CrptWorkbench.Infrastructure.BulkShipmentCheckCounter", b =>
+        {
+            b.Property<Guid>("ProfileId").HasColumnType("TEXT");
+            b.Property<Guid>("JobId").HasColumnType("TEXT");
+            b.Property<int>("Mode").HasColumnType("INTEGER");
+            b.Property<string>("Inn").HasMaxLength(12).HasColumnType("TEXT");
+            b.Property<int>("State").HasColumnType("INTEGER");
+            b.Property<string>("Status").HasMaxLength(64).HasColumnType("TEXT");
+            b.Property<long>("Count").HasColumnType("INTEGER");
+            b.HasKey("ProfileId", "JobId", "Mode", "Inn", "State", "Status");
+            b.HasIndex("JobId");
+            b.ToTable("BulkShipmentCheckCounters");
+        });
 
         modelBuilder.Entity("CrptWorkbench.Domain.ApiRequestLog", b =>
         {
@@ -219,6 +260,12 @@ partial class WorkbenchDbContextModelSnapshot : ModelSnapshot
             b.HasOne("CrptWorkbench.Domain.SuzUtilisationJob", null)
                 .WithMany().HasForeignKey("JobId").OnDelete(DeleteBehavior.Cascade).IsRequired();
         });
+        modelBuilder.Entity("CrptWorkbench.Infrastructure.BulkShipmentCheck", b =>
+            b.HasOne("CrptWorkbench.Domain.BulkCodeJob", null).WithMany().HasForeignKey("JobId").OnDelete(DeleteBehavior.Cascade).IsRequired());
+        modelBuilder.Entity("CrptWorkbench.Infrastructure.BulkShipmentCheckProgressEntity", b =>
+            b.HasOne("CrptWorkbench.Domain.BulkCodeJob", null).WithMany().HasForeignKey("JobId").OnDelete(DeleteBehavior.Cascade).IsRequired());
+        modelBuilder.Entity("CrptWorkbench.Infrastructure.BulkShipmentCheckCounter", b =>
+            b.HasOne("CrptWorkbench.Domain.BulkCodeJob", null).WithMany().HasForeignKey("JobId").OnDelete(DeleteBehavior.Cascade).IsRequired());
 #pragma warning restore 612, 618
     }
 }

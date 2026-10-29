@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using CrptWorkbench.Application;
 using CrptWorkbench.Domain;
@@ -282,6 +282,48 @@ public sealed class PackageAggregationTests
         Assert.Equal(400, log.StatusCode);
     }
 
+    [Fact]
+    public async Task IndependentDocumentsOverlapAndRetainInputOrder()
+    {
+        var fixture = new Fixture(mock: true);
+        var entered = 0;
+        var both = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Client.OnExecuteAsync = async () =>
+        {
+            if (Interlocked.Increment(ref entered) == 2) both.SetResult();
+            await both.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        };
+        var records = await fixture.Submit([new(1, Item, Parent), new(2, SecondItem, SecondParent)]);
+        Assert.Equal(2, entered);
+        Assert.Equal([Parent, SecondParent], records.Select(x => x.PackageCode));
+        Assert.All(records, record => Assert.Equal("Tracking", record.State));
+    }
+
+    [Fact]
+    public async Task FirstFailureStopsRemainingIndependentDocuments()
+    {
+        var fixture = new Fixture(mock: true);
+        fixture.Client.Status = 400;
+        var records = await fixture.Submit([new(1, Item, Parent), new(2, SecondItem, SecondParent)]);
+        Assert.Single(records);
+        Assert.Single(fixture.Client.Requests);
+        Assert.Equal("Rejected", records[0].State);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellationBeforeTransportDispatchNeverBecomesUnknown(bool wrapped)
+    {
+        var fixture = new Fixture(mock: true);
+        fixture.Client.Failure = wrapped
+            ? new TaskCanceledException("HttpClient cancellation", new ApiDispatchNotStartedException(new OperationCanceledException()))
+            : new ApiDispatchNotStartedException(new OperationCanceledException());
+        var result = await fixture.Submit([new(1, Item, Parent)]);
+        Assert.Equal("Rejected", Assert.Single(result).State);
+        Assert.Null(result[0].DocumentId);
+    }
+
     private sealed class Fixture
     {
         public CrptProfile Profile { get; } = new() { Inn = "7700000000", CertificateThumbprint = new string('A', 40) };
@@ -320,13 +362,13 @@ public sealed class PackageAggregationTests
         public string? PersistedGuid { get; private set; }
         public CancellationToken LastUpdateToken { get; private set; }
         public Task AddAsync(PackageDocument document, CancellationToken cancellationToken = default)
-        { cancellationToken.ThrowIfCancellationRequested(); Items.Add(document); States.Add(document.State); return Task.CompletedTask; }
+        { cancellationToken.ThrowIfCancellationRequested(); lock (Items) Items.Add(document); lock (States) States.Add(document.State); return Task.CompletedTask; }
         public Task UpdateAsync(PackageDocument document, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             LastUpdateToken = cancellationToken;
             PersistedGuid = document.DocumentId;
-            States.Add(document.State);
+            lock (States) States.Add(document.State);
             return Task.CompletedTask;
         }
         public Task<IReadOnlyList<PackageDocument>> ListAsync(Guid profileId, PackageOperationKind kind, CancellationToken cancellationToken = default) =>
@@ -359,7 +401,7 @@ public sealed class PackageAggregationTests
     {
         public List<ApiRequestLog> Items { get; } = [];
         public Task AddAsync(ApiRequestLog entry, CancellationToken cancellationToken = default)
-        { cancellationToken.ThrowIfCancellationRequested(); Items.Add(entry); return Task.CompletedTask; }
+        { cancellationToken.ThrowIfCancellationRequested(); lock (Items) Items.Add(entry); return Task.CompletedTask; }
         public Task<IReadOnlyList<ApiRequestLog>> ListAsync(Guid profileId, int take, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ApiRequestLog>>(Items.Where(x => x.ProfileId == profileId).Take(take).ToArray());
         public Task<ApiRequestLog?> GetAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Items.SingleOrDefault(x => x.ProfileId == profileId && x.Id == id));
     }
@@ -372,16 +414,19 @@ public sealed class PackageAggregationTests
         public string? ResponseBody { get; set; }
         public Exception? Failure { get; set; }
         public Action? BeforeReturning { get; set; }
-        public Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
+        public Func<Task>? OnExecuteAsync { get; set; }
+        public async Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
         {
-            Requests.Add(request);
+            if (request.BeforeDispatchAsync is not null) await request.BeforeDispatchAsync(cancellationToken);
+            lock (Requests) Requests.Add(request);
+            if (OnExecuteAsync is not null) await OnExecuteAsync();
             if (Failure is not null) throw Failure;
             var headers = new Dictionary<string, string>(request.Headers) { ["Authorization"] = "Bearer auth-secret" };
             var exchange = new IntegrationExchange(Status, request.Method, request.Url, headers, request.Body,
                 mock ? new Dictionary<string, string> { ["X-CRPT-Workbench-Mock"] = "true" } : new Dictionary<string, string>(),
                 ResponseBody ?? JsonSerializer.Serialize(Guid.NewGuid().ToString()), TimeSpan.FromMilliseconds(1));
             BeforeReturning?.Invoke();
-            return Task.FromResult(exchange);
+            return exchange;
         }
     }
 }

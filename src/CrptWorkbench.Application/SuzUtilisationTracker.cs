@@ -10,11 +10,13 @@ public sealed class SuzUtilisationTracker(ISuzUtilisationRepository repository, 
     public Task RecoverSendingAsync(CancellationToken cancellationToken = default) => repository.RecoverSendingAsync(cancellationToken);
     public async Task PollDueAsync(CancellationToken cancellationToken = default)
     {
-        for (var i = 0; i < 10; i++)
+        for (var i = 0; i < 10;)
         {
-            var claimed = await repository.ClaimDueAsync(clock.GetUtcNow().ToUnixTimeMilliseconds(), 1, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var claimed = await repository.ClaimDueAsync(clock.GetUtcNow().ToUnixTimeMilliseconds(), Math.Min(4, 10 - i), cancellationToken);
             if (claimed.Count == 0) break;
-            await PollAsync(claimed[0], cancellationToken);
+            i += claimed.Count;
+            await Task.WhenAll(claimed.Select(report => PollAsync(report, cancellationToken)));
         }
     }
     private static IEnumerable<string> States(JsonElement? element)
@@ -34,6 +36,12 @@ public sealed class SuzUtilisationTracker(ISuzUtilisationRepository repository, 
     private async Task PollAsync(SuzUtilisationReport report, CancellationToken cancellationToken)
     {
         var owner = report.TrackingOwner ?? throw new InvalidOperationException("Tracking requires ownership.");
+        await using var lease = new TrackingLeaseHeartbeat(clock, token =>
+        {
+            var current = clock.GetUtcNow().ToUnixTimeMilliseconds();
+            return repository.RenewCheckLeaseAsync(report.Id, owner, current, current + 120_000, token);
+        }, cancellationToken);
+        cancellationToken = lease.Token;
         var job = await repository.GetJobForTrackingAsync(report.JobId, cancellationToken);
         int? httpStatus = null;
         var duration = Stopwatch.StartNew();
@@ -77,12 +85,13 @@ public sealed class SuzUtilisationTracker(ISuzUtilisationRepository repository, 
         catch (Exception) { report.Error = "Последняя проверка не удалась. Отслеживание будет продолжено."; }
         finally
         {
+            await lease.StopAsync();
             var now = clock.GetUtcNow();
             report.LastCheckedAtUnixMs = now.ToUnixTimeMilliseconds(); report.PollCount++;
             var elapsed = now.ToUnixTimeMilliseconds() - (report.SubmittedAtUnixMs ?? now.ToUnixTimeMilliseconds());
             var delay = report.PollCount switch { 1 => 15, 2 => 30, _ when elapsed < 3600000 => 60, _ => 300 };
             report.NextCheckAtUnixMs = report.State == "Tracking" ? now.AddSeconds(delay).ToUnixTimeMilliseconds() : null;
-            if (await repository.CompleteCheckAsync(report, owner, CancellationToken.None) && job is not null)
+            if (!lease.OwnershipLost && await repository.CompleteCheckAsync(report, owner, CancellationToken.None) && job is not null)
                 await service.RecordAsync(job, report, "suz.report-info", "GET", httpStatus, CancellationToken.None, duration.ElapsedMilliseconds);
         }
     }

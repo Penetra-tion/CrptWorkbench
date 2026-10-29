@@ -116,8 +116,8 @@ public sealed class AggregationTreeTests
 
     [Theory]
     [InlineData(100000, true)]
-    [InlineData(100001, false)]
-    public async Task UniqueCodeCapIncludesRootAndBoundsBatchesAndConcurrency(int total, bool complete)
+    [InlineData(100001, true)]
+    public async Task LargeTreeHasNoApplicationCapAndBoundsBatchesAndConcurrency(int total, bool complete)
     {
         var active = 0;
         var peak = 0;
@@ -136,10 +136,10 @@ public sealed class AggregationTreeTests
             finally { Interlocked.Decrement(ref active); }
         });
         var tree = await Run(client, Code(1));
-        Assert.Equal(100000, tree.Nodes.Count);
-        Assert.Equal(100000, client.Requests.SelectMany(Codes).Distinct().Count());
+        Assert.Equal(total, tree.Nodes.Count);
+        Assert.Equal(total, client.Requests.SelectMany(Codes).Distinct().Count());
         Assert.All(client.Requests, r => Assert.InRange(Codes(r).Length, 1, 1000));
-        Assert.InRange(peak, 1, Math.Clamp(Environment.ProcessorCount, 1, 4));
+        Assert.InRange(peak, 1, 4);
         Assert.Equal(complete, tree.Complete);
         Assert.Equal(complete ? 0 : 1, tree.Nodes.Single(n => n.Code == Code(1)).OmittedChildren);
     }

@@ -8,6 +8,59 @@ namespace CrptWorkbench.Tests;
 
 public sealed class CodeInfoTests
 {
+    [Fact]
+    public async Task DocumentsAreNotRequestedByDefault()
+    {
+        var exchange = await new TrueApiCodeInfoHandler(new MockTrueApiClient()).ExecuteAsync(
+            Input(First), Context, TestContext.Current.CancellationToken);
+        Assert.Null(Assert.Single(CodeInfoResults.Parse(exchange.ResponseBody)!.Items).DocumentHistory);
+        Assert.Null(exchange.Exchanges);
+        Assert.False(TrueApiCodeInfoHandler.Parse(Input(First)).LoadDocuments);
+    }
+    [Fact]
+    public async Task DocumentReadsOverlapAndSharedRequestsAreNotRepeated()
+    {
+        var client = new DelayedDocumentClient();
+        var values = new Dictionary<string, string> { ["codes"] = string.Join('\n', Enumerable.Range(1, 8).Select(i => $"010460000000000021DEMO{i:000000000}").Append(First)), ["loadDocuments"] = "true" };
+        var exchange = await new TrueApiCodeInfoHandler(client).ExecuteAsync(values, Context, TestContext.Current.CancellationToken);
+        Assert.InRange(client.Maximum, 2, 4);
+        Assert.Equal(9, CodeInfoResults.Parse(exchange.ResponseBody)!.Items.Count);
+        Assert.All(client.Requests.GroupBy(x => x), group => Assert.Single(group));
+        Assert.Equal(client.Requests.Count + 1, exchange.Exchanges!.Count);
+        Assert.All(exchange.Exchanges, item => Assert.Equal(Context.CorrelationId, item.ResponseHeaders["X-Correlation-Id"]));
+    }
+
+    private sealed class DelayedDocumentClient : ITrueApiClient
+    {
+        private readonly MockTrueApiClient inner = new();
+        private int active;
+        public int Maximum;
+        public System.Collections.Concurrent.ConcurrentBag<string> Requests { get; } = new();
+        public Uri BaseAddress => inner.BaseAddress;
+        public async Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken)
+        {
+            if (request.Url.Contains("cises/info")) return await inner.ExecuteAsync(request, cancellationToken);
+            Requests.Add(request.Url);
+            var count = Interlocked.Increment(ref active);
+            int previous;
+            do { previous = Maximum; } while (count > previous && Interlocked.CompareExchange(ref Maximum, count, previous) != previous);
+            try
+            {
+                await Task.Delay(30, cancellationToken);
+                return await inner.ExecuteAsync(request, cancellationToken);
+            }
+            finally { Interlocked.Decrement(ref active); }
+        }
+    }
+    [Theory]
+    [InlineData("0104607167620070215ZsCJggFr(01)")]
+    [InlineData("0104607167626157215a9rD(21)KcO*")]
+    public void BracketsInsideSerialNumberArePreserved(string code)
+    {
+        Assert.Equal(code, Assert.Single(TrueApiCodeInfoHandler.Parse(Input(code)).Codes));
+        Assert.Equal(code, Assert.Single(TrueApiBulkCodeInfoHandler.Parse(Input(code)).Codes));
+    }
+
     public const string First = "010460000000000021DEMO000000001";
     public const string Second = "010460000000000021DEMO000000002";
     public const string Group = "046000000000000001";
@@ -32,7 +85,7 @@ public sealed class CodeInfoTests
         Assert.Equal("application/json", request.Headers["Accept"]);
         Assert.Equal(Context.CorrelationId, request.Headers["X-Correlation-Id"]);
         Assert.Equal(Context.CorrelationId, request.CorrelationId);
-        Assert.Single(handler.Descriptor.Fields);
+        Assert.Equal(2, handler.Descriptor.Fields.Count);
         Assert.True(handler.Descriptor.Fields[0].Multiline);
     }
 
@@ -165,7 +218,7 @@ public sealed class CodeInfoTests
     public async Task MockDocumentHistoryDistinguishesPaymentAndKeepsTechnicalExchanges()
     {
         var exchange = await new TrueApiCodeInfoHandler(new MockTrueApiClient()).ExecuteAsync(
-            Input($"{First}\n{Second}"), Context, TestContext.Current.CancellationToken);
+            new Dictionary<string, string> { ["codes"] = $"{First}\n{Second}", ["loadDocuments"] = "true" }, Context, TestContext.Current.CancellationToken);
         var items = CodeInfoResults.Parse(exchange.ResponseBody)!.Items;
         Assert.True(items[0].DocumentHistory!.Paid);
         Assert.Contains(items[0].DocumentHistory!.Documents, document =>
@@ -183,7 +236,7 @@ public sealed class CodeInfoTests
     public async Task HistoryFailureDoesNotTurnUnknownPaymentIntoNo()
     {
         var exchange = await new TrueApiCodeInfoHandler(new HistoryFailureClient()).ExecuteAsync(
-            Input(First), Context, TestContext.Current.CancellationToken);
+            new Dictionary<string, string> { ["codes"] = First, ["loadDocuments"] = "true" }, Context, TestContext.Current.CancellationToken);
         var item = Assert.Single(CodeInfoResults.Parse(exchange.ResponseBody)!.Items);
         Assert.True(CodeInfoResults.IsFound(item));
         Assert.Null(item.DocumentHistory!.Paid);

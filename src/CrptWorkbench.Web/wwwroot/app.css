@@ -635,3 +635,19 @@ th, td { padding: 11px 10px; border-bottom: 1px solid var(--line); }
   .utilisation-condition { display: grid; grid-template-columns: minmax(0, 1fr); }
   .utilisation-table { max-width: 100%; overflow-x: auto; }
 }
+/* Keep navigation visible on narrow screens. */
+@media (min-width: 761px) {
+ .shell { grid-template-columns: 240px minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+ .sidebar nav { flex-wrap: wrap; overflow-x: visible; gap: 4px; }
+ .system-tabs { flex-wrap: wrap; overflow-x: visible; gap: 4px; }
+ .system-tabs button { white-space: normal; }
+}
+#history-detail { scroll-margin-top: 80px; }
+.console-heading { margin-bottom: 16px; }
+.console-heading + .production-notice { padding: 9px 13px; margin-bottom: 16px; }
+.editor .operation-title { margin-bottom: 8px; }
+.editor .file-text-field textarea { height: 160px; min-height: 130px; }
+@media (min-width: 761px) { .topbar .profile-title { display: none; } }
+.profile-caption, .eyebrow, th { text-transform: none; letter-spacing: .03em; }

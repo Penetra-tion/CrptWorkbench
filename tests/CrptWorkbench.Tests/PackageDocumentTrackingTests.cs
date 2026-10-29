@@ -174,6 +174,107 @@ public sealed class PackageDocumentTrackingTests
         Assert.Equal(transformation.Id, claimed.Id);
     }
 
+    [Fact]
+    public async Task IndependentChecksOverlapWithFourWorkersAndTenRecordPassLimit()
+    {
+        await using var f = await Fixture.CreateAsync();
+        for (var i = 0; i < 12; i++)
+        {
+            var document = f.Document(); document.Id = Guid.NewGuid();
+            await f.Repository.AddAsync(document, Ct);
+        }
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var active = 0;
+        var maximum = 0;
+        f.Client.BeforeResponse = async token =>
+        {
+            var count = Interlocked.Increment(ref active);
+            int previous;
+            do { previous = Volatile.Read(ref maximum); }
+            while (count > previous && Interlocked.CompareExchange(ref maximum, count, previous) != previous);
+            if (count == 4) started.TrySetResult();
+            try { await release.Task.WaitAsync(token); }
+            finally { Interlocked.Decrement(ref active); }
+        };
+        var polling = f.Tracker.PollDueAsync(Ct);
+        try { await started.Task.WaitAsync(TimeSpan.FromSeconds(5), Ct); }
+        finally { release.TrySetResult(); await polling; }
+        Assert.Equal(4, maximum);
+        Assert.Equal(10, f.Client.Calls);
+        Assert.Equal(10, (await f.Repository.ListAsync(f.Profile.Id, PackageOperationKind.Aggregation, Ct)).Count(x => x.PollCount == 1));
+    }
+
+    [Fact]
+    public async Task LeaseRenewalExcludesOtherWorkersAndRejectsExpiredOrReplacedTokens()
+    {
+        await using var f = await Fixture.CreateAsync();
+        await f.Repository.AddAsync(f.Document(), Ct);
+        var now = f.Clock.Now.ToUnixTimeMilliseconds();
+        var claimed = Assert.Single(await f.Repository.ClaimDueAsync(now, 1, Ct));
+        var originalLease = claimed.LeaseUntilUnixMs!.Value;
+        var renewedLease = now + 210_000;
+        Assert.True(await f.Repository.RenewCheckLeaseAsync(claimed.Id, originalLease, now + 90_000, renewedLease, Ct));
+        Assert.Empty(await f.Repository.ClaimDueAsync(now + 120_001, 1, Ct));
+        Assert.False(await f.Repository.RenewCheckLeaseAsync(claimed.Id, originalLease, now + 100_000, now + 220_000, Ct));
+        Assert.False(await f.Repository.CompleteCheckAsync(claimed, originalLease, Ct));
+        Assert.False(await f.Repository.RenewCheckLeaseAsync(claimed.Id, renewedLease, renewedLease, renewedLease + 120_000, Ct));
+        var replacement = Assert.Single(await f.Repository.ClaimDueAsync(renewedLease + 1, 1, Ct));
+        Assert.False(await f.Repository.RenewCheckLeaseAsync(claimed.Id, renewedLease, renewedLease + 2, renewedLease + 120_000, Ct));
+        Assert.True(await f.Repository.CompleteCheckAsync(replacement, replacement.LeaseUntilUnixMs!.Value, Ct));
+    }
+
+    [Fact]
+    public async Task WaitingRequestRenewsLeaseAndCannotBeClaimedAfterOriginalExpiry()
+    {
+        await using var f = await Fixture.CreateAsync();
+        await f.Repository.AddAsync(f.Document(), Ct);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        f.Client.BeforeResponse = async token => { entered.TrySetResult(); await release.Task.WaitAsync(token); };
+        var polling = f.Tracker.PollDueAsync(Ct);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), Ct);
+            f.Clock.Now = f.Start.AddSeconds(90);
+            f.Clock.Pulse();
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+            deadline.CancelAfter(TimeSpan.FromSeconds(5));
+            var renewed = f.Start.AddSeconds(210).ToUnixTimeMilliseconds();
+            while ((await f.Repository.GetAsync(f.Id, deadline.Token))!.LeaseUntilUnixMs != renewed)
+                await Task.Delay(10, deadline.Token);
+            f.Clock.Now = f.Start.AddSeconds(121);
+            Assert.Empty(await f.Repository.ClaimDueAsync(f.Clock.Now.ToUnixTimeMilliseconds(), 1, Ct));
+        }
+        finally { release.TrySetResult(); await polling; }
+        var saved = (await f.Repository.GetAsync(f.Id, Ct))!;
+        Assert.Equal(1, saved.PollCount);
+        Assert.Null(saved.LeaseUntilUnixMs);
+        Assert.Single(await f.Logs.ListAsync(f.Profile.Id, 10, Ct));
+    }
+
+    [Fact]
+    public async Task LostLeaseCancelsWaitingRequestAndPublishesNeitherStateNorHistory()
+    {
+        await using var f = await Fixture.CreateAsync();
+        await f.Repository.AddAsync(f.Document(), Ct);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        f.Client.BeforeResponse = async token => { entered.TrySetResult(); await Task.Delay(Timeout.Infinite, token); };
+        var polling = f.Tracker.PollDueAsync(Ct);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), Ct);
+        f.Clock.Now = f.Start.AddSeconds(121);
+        var replacement = Assert.Single(await f.Repository.ClaimDueAsync(f.Clock.Now.ToUnixTimeMilliseconds(), 1, Ct));
+        replacement.State = "Finished";
+        replacement.RemoteStatus = "CHECKED_OK";
+        Assert.True(await f.Repository.CompleteCheckAsync(replacement, replacement.LeaseUntilUnixMs!.Value, Ct));
+        f.Clock.Pulse();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => polling.WaitAsync(TimeSpan.FromSeconds(5), Ct));
+        var saved = (await f.Repository.GetAsync(f.Id, Ct))!;
+        Assert.Equal("Finished", saved.State);
+        Assert.Equal("CHECKED_OK", saved.RemoteStatus);
+        Assert.Empty(await f.Logs.ListAsync(f.Profile.Id, 10, Ct));
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _anchor;
@@ -218,8 +319,24 @@ public sealed class PackageDocumentTrackingTests
 
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
+        private readonly List<PulseTimer> _timers = [];
         public DateTimeOffset Now { get; set; } = now;
         public override DateTimeOffset GetUtcNow() => Now;
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new PulseTimer(callback, state);
+            _timers.Add(timer);
+            return timer;
+        }
+        public void Pulse() { foreach (var timer in _timers.ToArray()) timer.Pulse(); }
+        private sealed class PulseTimer(TimerCallback callback, object? state) : ITimer
+        {
+            private bool _disposed;
+            public void Pulse() { if (!_disposed) callback(state); }
+            public bool Change(TimeSpan dueTime, TimeSpan period) => !_disposed;
+            public void Dispose() => _disposed = true;
+            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        }
     }
     private sealed class Profiles(CrptProfile profile) : IProfileRepository
     {
@@ -234,16 +351,19 @@ public sealed class PackageDocumentTrackingTests
     private sealed class StatusClient : ITrueApiClient
     {
         public Uri BaseAddress { get; } = new("https://trueapi.mock.invalid");
-        public int Calls { get; private set; }
+        private int _calls;
+        public int Calls => Volatile.Read(ref _calls);
+        public Func<CancellationToken, Task>? BeforeResponse { get; set; }
         public string Body { get; set; } = "[{\"status\":\"IN_PROGRESS\",\"errors\":[]}]";
         public IntegrationRequest? LastRequest { get; private set; }
-        public Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
+        public async Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
         {
-            Calls++; LastRequest = request;
+            Interlocked.Increment(ref _calls); LastRequest = request;
+            if (BeforeResponse is not null) await BeforeResponse(cancellationToken);
             var headers = request.Headers.ToDictionary(x => x.Key, x => x.Value);
             headers["Authorization"] = "Bearer private-token";
-            return Task.FromResult(new IntegrationExchange(200, request.Method, request.Url, headers, request.Body,
-                new Dictionary<string, string> { ["X-CRPT-Workbench-Mock"] = "true" }, Body, TimeSpan.FromMilliseconds(5)));
+            return new IntegrationExchange(200, request.Method, request.Url, headers, request.Body,
+                new Dictionary<string, string> { ["X-CRPT-Workbench-Mock"] = "true" }, Body, TimeSpan.FromMilliseconds(5));
         }
     }
 }

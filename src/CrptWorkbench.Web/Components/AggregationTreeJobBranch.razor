@@ -1,0 +1,55 @@
+@inject AggregationTreeJobService Jobs
+@implements IDisposable
+<div class="aggregation-lazy-branch" role="group">
+    <Virtualize Items="_items" Context="node" ItemSize="84" OverscanCount="3">
+        <div @key="node.Code" class="aggregation-lazy-node" role="treeitem" aria-level="@(Ancestors.Count + 1)" aria-expanded="@(node.HasChildren ? _expanded.Contains(node.Code) : (bool?)null)">
+            <div class="aggregation-lazy-row">
+                @if (node.HasChildren && !Ancestors.Contains(node.Code))
+                {
+                    <button type="button" class="button ghost" aria-label="@($"{(_expanded.Contains(node.Code) ? "Свернуть" : "Раскрыть")} {node.Code}")" @onclick="() => Toggle(node.Code)" @onkeydown="args => OnKey(args, node.Code)">@(_expanded.Contains(node.Code) ? "−" : "+")</button>
+                }
+                <div><a class="aggregation-code" href="@($"/console?code={Uri.EscapeDataString(node.Code)}")">@node.Code</a>
+                    <div class="muted">@AggregationTreeJobs.TypeLabel(node.PackageType) · @CodeInfoResults.StatusLabel(node.Status) · Вложений: @node.ChildCount</div>
+                    @if (node.Requested) { <small>Исходный код</small> }
+                    @if (node.Error is not null) { <p class="error-text">@node.Error</p> }
+                    else if (!node.Valid) { <small class="muted">Путь не подтверждён</small> }
+                </div>
+            </div>
+            @if (_expanded.Contains(node.Code) && !Ancestors.Contains(node.Code))
+            {
+                <AggregationTreeJobBranch ProfileId="ProfileId" JobId="JobId" Parent="@node.Code" Ancestors="@(Ancestors.Append(node.Code).ToHashSet(StringComparer.Ordinal))" />
+            }
+        </div>
+    </Virtualize>
+    @if (_error is not null) { <p class="error-text" role="alert">@_error</p><button class="button ghost" @onclick="LoadAsync">Повторить</button> }
+    @if (_more) { <button type="button" class="button ghost" disabled="@_loading" @onclick="LoadAsync">@(_loading ? "Загрузка…" : "Добавить ещё 100")</button> }
+    @if (!_loading && _items.Count == 0 && _error is null) { <p class="muted">Узлы пока не загружены.</p> }
+</div>
+@code {
+    [Parameter] public Guid ProfileId { get; set; }
+    [Parameter] public Guid JobId { get; set; }
+    [Parameter] public string? Parent { get; set; }
+    [Parameter] public HashSet<string> Ancestors { get; set; } = new(StringComparer.Ordinal);
+    private readonly List<AggregationJobNode> _items = [];
+    private readonly HashSet<string> _expanded = new(StringComparer.Ordinal);
+    private readonly CancellationTokenSource _lifetime = new();
+    private string? _cursor, _error;
+    private bool _loading, _more = true;
+    protected override Task OnInitializedAsync() => LoadAsync();
+    private void OnKey(KeyboardEventArgs args, string code) { if (args.Key == "ArrowRight") _expanded.Add(code); else if (args.Key == "ArrowLeft") _expanded.Remove(code); }
+    private void Toggle(string code) { if (!_expanded.Remove(code)) _expanded.Add(code); }
+    private async Task LoadAsync()
+    {
+        if (_loading) return;
+        _loading = true; _error = null;
+        try
+        {
+            var page = await Jobs.NodesAsync(ProfileId, JobId, Parent, _cursor, _lifetime.Token);
+            _items.AddRange(page.Items); _cursor = page.NextCursor; _more = _cursor is not null;
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception) { _error = "Не удалось прочитать ветвь дерева."; }
+        finally { _loading = false; }
+    }
+    public void Dispose() { _lifetime.Cancel(); _lifetime.Dispose(); }
+}

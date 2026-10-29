@@ -7,7 +7,7 @@ using CrptWorkbench.Domain;
 
 namespace CrptWorkbench.Application;
 
-internal sealed record PackageDocumentDraft(string PackageCode, int ItemCount, string Json);
+internal sealed record PackageDocumentDraft(string PackageCode, int ItemCount, string Json, IReadOnlySet<string>? Codes = null);
 
 public sealed class PackageDocumentService(
     IPackageDocumentRepository repository,
@@ -46,8 +46,8 @@ public sealed class PackageDocumentService(
             PackageOperationKind.CodeCorrection => ("true-api.code-correction", "CIS_INFORMATION_CHANGE"),
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
-        var result = new List<PackageDocument>();
-        foreach (var draft in drafts)
+        var result = new System.Collections.Concurrent.ConcurrentDictionary<PackageDocumentDraft, PackageDocument>();
+        await IndependentDocumentDispatch.RunAsync(drafts, draft => Task.FromResult(draft.Codes), async (draft, canDispatch, stopDispatch) =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             var record = new PackageDocument
@@ -60,10 +60,12 @@ public sealed class PackageDocumentService(
                 CreatedAtUnixMs = clock.GetUtcNow().ToUnixTimeMilliseconds()
             };
             await repository.AddAsync(record, cancellationToken);
-            result.Add(record);
+            result[draft] = record;
             IntegrationRequest? request = null;
             IntegrationExchange? exchange = null;
             var stopwatch = Stopwatch.StartNew();
+            var dispatched = false;
+            var enteredClient = false;
             try
             {
                 var signature = record.Mode == CrptIntegrationMode.Mock ? "mock-detached-signature" :
@@ -78,8 +80,19 @@ public sealed class PackageDocumentService(
                 request = new(operationId, "POST", $"lk/documents/create?pg={group}",
                     new Dictionary<string, string> { ["Accept"] = "application/json", ["X-Correlation-Id"] = correlationId },
                     body, correlationId, new(profile.Id, profile.Inn, profile.CertificateThumbprint));
-                record.State = "Sending";
-                await repository.UpdateAsync(record, cancellationToken);
+                request = request with { BeforeDispatchAsync = async token =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (!canDispatch()) throw new OperationCanceledException("Submission stopped before dispatch.");
+                    record.State = "Sending";
+                    await repository.UpdateAsync(record, token);
+                    token.ThrowIfCancellationRequested();
+                    if (!canDispatch()) throw new OperationCanceledException("Submission stopped before dispatch.");
+                    dispatched = true;
+                }};
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!canDispatch()) { record.State = "Rejected"; record.Error = "Отправка остановлена до отправки запроса."; return false; }
+                enteredClient = true;
                 exchange = await client.ExecuteAsync(request, cancellationToken);
                 if (exchange.StatusCode is >= 200 and < 300 && TryDocumentId(exchange.ResponseBody, out var documentId))
                 {
@@ -99,27 +112,35 @@ public sealed class PackageDocumentService(
                         : $"HTTP {exchange.StatusCode}: документ отклонён. Подробности доступны в истории.";
                 }
             }
+            catch (OperationCanceledException exception) when (IndependentDocumentDispatch.WasNotDispatched(exception))
+            {
+                record.State = "Rejected";
+                record.Error = "Отправка отменена до отправки запроса.";
+                if (cancellationToken.IsCancellationRequested) throw;
+            }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                record.State = record.State == "Sending" ? "Unknown" : "Rejected";
+                record.State = dispatched || enteredClient ? "Unknown" : "Rejected";
                 record.Error = record.State == "Unknown" ? "Отправка прервана; результат неизвестен." : "Подготовка документа отменена.";
                 throw;
             }
             catch (Exception exception)
             {
-                record.State = record.State == "Sending" ? "Unknown" : "Rejected";
+                record.State = dispatched || enteredClient ? "Unknown" : "Rejected";
                 record.Error = record.State == "Unknown" ? "Результат отправки неизвестен; проверьте документ вручную." :
                     $"Не удалось подготовить документ ({exception.GetType().Name}).";
             }
             finally
             {
+                if (record.State != "Tracking") stopDispatch();
                 // Once a GUID has arrived, a disconnected browser must not prevent saving it.
                 await repository.UpdateAsync(record, CancellationToken.None);
                 if (request is not null)
                     await history.RecordAsync(record, request, exchange, record.Error, stopwatch.ElapsedMilliseconds, CancellationToken.None);
             }
-        }
-        return result;
+            return record.State == "Tracking";
+        }, cancellationToken);
+        return drafts.Where(result.ContainsKey).Select(draft => result[draft]).ToArray();
     }
 
     public Task<RecordPage<PackageDocument>> ListPageAsync(Guid profileId, PackageOperationKind kind, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default) =>

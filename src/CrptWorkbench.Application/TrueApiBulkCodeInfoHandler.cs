@@ -24,7 +24,7 @@ public sealed class TrueApiBulkCodeInfoHandler(ITrueApiClient client) : IApiOper
             if (string.IsNullOrWhiteSpace(code)) continue;
             codes.Add(code);
             if (code.Any(char.IsControl)) errors.Add($"Строка {i + 1}: КИ не должен содержать управляющие символы.");
-            else if (code.Contains("(01)", StringComparison.Ordinal) || code.Contains("(21)", StringComparison.Ordinal))
+            else if (MarkingCodeFormat.HasBracketedApplicationIdentifiers(code))
                 errors.Add($"Строка {i + 1}: укажите нормализованный КИ без скобок вокруг 01 и 21.");
             else if (code.Length is < 18 or > 74)
                 errors.Add($"Строка {i + 1}: длина КИ должна быть от 18 до 74 символов (сейчас {code.Length}).");
@@ -41,7 +41,7 @@ public sealed class TrueApiBulkCodeInfoHandler(ITrueApiClient client) : IApiOper
         var results = new BatchResult[batches.Length];
         var stopwatch = Stopwatch.StartNew();
         await Parallel.ForEachAsync(Enumerable.Range(0, batches.Length),
-            new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 4), CancellationToken = cancellationToken },
+            new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken },
             async (index, token) => { results[index] = await FetchAsync(batches[index], context, token); });
         stopwatch.Stop();
         var exchanges = results.SelectMany(x => x.Exchanges).ToArray();
@@ -70,7 +70,7 @@ public sealed class TrueApiBulkCodeInfoHandler(ITrueApiClient client) : IApiOper
             exchanges.Add(exchange);
             if (exchange.StatusCode == 429 && attempt < 2)
             {
-                await Task.Delay(TimeSpan.FromSeconds(1 << attempt), cancellationToken);
+                await ApiReadRetry.WaitAsync(exchange.ResponseHeaders, attempt, cancellationToken);
                 continue;
             }
             if (exchange.StatusCode is not (>= 200 and < 300) and not 404)
@@ -94,9 +94,21 @@ public sealed class TrueApiBulkCodeInfoHandler(ITrueApiClient client) : IApiOper
 
 public static class BulkCodeInfoSelection
 {
-    public static IReadOnlyList<CodeInfoItem> Filter(CodeInfoResults results, IReadOnlySet<string> statuses) =>
+    public static IReadOnlyList<CodeInfoItem> FilterByOwner(CodeInfoResults results, IReadOnlySet<string> statuses, string? inn)
+    {
+        if (string.IsNullOrWhiteSpace(inn))
+            throw new InvalidOperationException("Для фильтра «Отгружен» укажите ИНН текущего профиля в настройках.");
+        inn = inn.Trim();
+        return results.Items.Where(item => CodeInfoResults.IsFound(item) &&
+            item.CisInfo?.Status is { } status && (statuses.Count == 0 || statuses.Contains(status)) &&
+            (string.IsNullOrWhiteSpace(item.CisInfo.OwnerInn) || !string.Equals(item.CisInfo.OwnerInn.Trim(), inn, StringComparison.Ordinal))).ToArray();
+    }
+
+    public static IReadOnlyList<CodeInfoItem> Filter(CodeInfoResults results, IReadOnlySet<string> statuses,
+        bool shippedOnly = false, IReadOnlyDictionary<string, ShipmentCheckResult>? shipments = null) =>
         results.Items.Where(item => CodeInfoResults.IsFound(item) &&
-            item.CisInfo?.Status is { } status && statuses.Contains(status)).ToArray();
+            item.CisInfo?.Status is { } status && (statuses.Count == 0 || statuses.Contains(status)) &&
+            (!shippedOnly || shipments?.GetValueOrDefault(item.CisInfo.RequestedCis ?? item.CisInfo.Cis ?? "")?.State == ShipmentCheckState.Shipped)).ToArray();
 
     public static string CopyCodes(IEnumerable<CodeInfoItem> items) =>
         string.Join('\n', items.Select(item => item.CisInfo?.RequestedCis ?? item.CisInfo?.Cis));

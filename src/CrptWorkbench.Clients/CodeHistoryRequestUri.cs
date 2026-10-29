@@ -13,7 +13,7 @@ internal static class CodeHistoryRequestUri
         if (encoded.Length == 0 || encoded.Contains('#')) return false;
         var code = Uri.UnescapeDataString(encoded);
         return code.Length is >= 18 and <= 74 && !code.Any(char.IsControl) &&
-            !code.Contains("(01)", StringComparison.Ordinal) && !code.Contains("(21)", StringComparison.Ordinal) &&
+            !MarkingCodeFormat.HasBracketedApplicationIdentifiers(code) &&
             Uri.EscapeDataString(code) == encoded;
     }
 

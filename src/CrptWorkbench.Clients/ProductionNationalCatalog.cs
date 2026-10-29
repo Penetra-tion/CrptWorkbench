@@ -25,7 +25,7 @@ public sealed class RealNationalCatalogClient(
         var exchange = await SendOnceAsync(request, token, cancellationToken);
         if (exchange.StatusCode == (int)HttpStatusCode.Unauthorized && options.Value.TrueApiAuthMode == CrptAuthenticationMode.Auto)
         {
-            tokens.Invalidate(authentication);
+            tokens.Invalidate(authentication, token);
             token = await tokens.GetTokenAsync(authentication, request.CorrelationId, cancellationToken);
             exchange = await SendOnceAsync(request, token, cancellationToken);
         }

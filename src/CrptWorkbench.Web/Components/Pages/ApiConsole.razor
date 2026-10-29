@@ -24,7 +24,7 @@
     <button type="button" class="button ghost" disabled="@_running" @onclick="ReturnToCodes">← Назад к запросу кодов</button>
 }
 <div class="page-heading console-heading">
-    <div><span class="eyebrow">Операции</span><h1>Получение сведений</h1></div>
+    <div><span class="eyebrow">Операции</span><h1>@(_selected?.Name ?? "Получение сведений")</h1></div>
 </div>
 
 <div class="notice production-notice"><strong>@ModeHeadline</strong> @ModeDescription</div>
@@ -42,12 +42,18 @@
         @if (_selected is not null)
         {
             <div class="operation-title">
-                <div><span class="eyebrow">@SystemName(_selected.System)</span><h2>@_selected.Name</h2></div>
+                <div><span class="eyebrow">@SystemName(_selected.System)</span></div>
                 <span class="method-badge large">@_selected.HttpMethod</span>
             </div>
 
             <p class="muted">@_selected.Description</p>
 
+            @if (_selected.Id == TrueApiAggregationTreeHandler.OperationId)
+            {
+                <AggregationTreeJobs OpenJobId="RequestedAggregationJob" InitialText="@RequestedCode" />
+            }
+            else
+            {
             <div class="field-grid">
                 @foreach (var field in _selected.Fields)
                 {
@@ -88,20 +94,39 @@
                 }
             </div>
 
+            <div class="actions editor-actions submit-actions">
+                <button type="button" class="button primary execute-button" @onclick="ExecuteAsync" disabled="@_running">
+                    <span aria-hidden="true">@(_running ? "◌" : "→")</span>@(_running ? "Выполняется…" : "Получить информацию")
+                </button>
+                @if (_running && _selected.Id is TrueApiBulkCodeInfoHandler.OperationId or TrueApiAggregationTreeHandler.OperationId)
+                {
+                    <button type="button" class="button ghost" @onclick="CancelBulk">Отменить</button>
+                }
+            </div>
             @if (_selected.Id == TrueApiBulkCodeInfoHandler.OperationId)
             {
                 @if (_bulkUploading) { <p role="status">Загружаем файл на сервер…</p> }
                 @if (_bulkFileError is not null) { <p class="error-text" role="alert">@_bulkFileError</p> }
                 <fieldset class="bulk-status-filter">
-                    <legend>Показывать КМ в статусах</legend>
+                    <legend>Фильтры КМ (без выбора — все)</legend>
                     <div class="bulk-status-options">
                         @foreach (var status in BulkStatuses)
                         {
                             <label><input type="checkbox" checked="@_bulkStatuses.Contains(status.Code)" @onchange="args => SetBulkStatus(status.Code, args.Value is true)" disabled="@_running" /><span>@status.Label</span></label>
                         }
                         <label><input type="checkbox" checked="@_bulkPaidOnly" @onchange="args => SetBulkPaidOnly(args.Value is true)" disabled="@_running" /><span>Оплачен</span></label>
+                        <label><input type="checkbox" checked="@_bulkShippedOnly" @onchange="args => SetBulkShippedOnly(args.Value is true)" disabled="@_running" /><span>Отгружен</span></label>
                     </div>
                 </fieldset>
+                @if (_bulkShippedOnly)
+                {
+                    <p class="muted" role="status">Код не числится за организацией текущего профиля. @(_shipmentBusy ? "Проверяем сведения о владельцах…" : "Фильтр по ИНН владельца, включая отсутствие владельца.")</p>
+                    @if (_shipmentError is not null)
+                    {
+                        <p class="error-text" role="alert">@_shipmentError</p>
+                        <button type="button" class="button ghost" @onclick="RetryShipmentCheck">Повторить проверку</button>
+                    }
+                }
                 <div class="bulk-jobs">
                     <div class="actions bulk-jobs-heading"><strong>Файловые задания</strong><button type="button" class="button ghost" @onclick="ResetBulkJobsAsync">Обновить</button></div>
                     @if (_bulkJobs.Count == 0) { <p class="muted">Заданий пока нет.</p> }
@@ -114,16 +139,28 @@
                             <small class="muted">Прочитано @job.LinesRead строк; @job.NextOffset из @job.FileBytes байт.</small>
                             @if (job.State == "Partial") { <p class="error-text">Результат неполный: часть партий завершилась ошибкой.</p> }
                             @if (job.Error is not null) { <p class="error-text">@job.Error</p> }
+                            @if (_bulkShippedOnly)
+                            {
+                                <p class="muted" role="status">Проверено владельцев: @(_fileShipments.GetValueOrDefault(job.Id)?.ReviewedRows ?? 0) из @job.CodesFound.</p>
+                                @if (_fileShipments.GetValueOrDefault(job.Id)?.UnknownRows > 0)
+                                {
+                                    <p class="error-text">Для @(_fileShipments[job.Id].UnknownRows) строк старого результата сведения о владельце не сохранялись. Выполните новый запрос по исходному файлу.</p>
+                                }
+                            }
                             <BulkCodeSummary Counts="@JobCounts(job.Id)" SelectedCount="@SelectedBulkCount(job.Id)"
-                                             CanPreview="@(job.State == "Completed")"
-                                             PreviewKey="@($"{Workbench.ProfileId}:{job.Id}:{string.Join(',', SelectedBulkStatuses.Order())}")"
+                                             ShippedCount="@(_bulkShippedOnly && _fileShipments.ContainsKey(job.Id) ? SelectedBulkCount(job.Id) : (long?)null)"
+                                             CanPreview="false"
+                                             PreviewKey="@($"{Workbench.ProfileId}:{job.Id}:{string.Join(',', SelectedBulkStatuses.Order())}:{_bulkShippedOnly}:{(_bulkShippedOnly ? _shipmentRevision : 0)}")"
                                              PreviewPageLoader="@(cursor => PreviewBulkJobAsync(job.Id, cursor))" OnDownload="@(() => DownloadBulkAsync(job.Id))" />
+                            <BulkRejectedRows @key="@($"{Workbench.ProfileId}:{job.Id}")" ProfileId="@job.ProfileId" JobId="@job.Id" />
                             <div class="actions">
                                 @if (job.State == "Ready") { <button type="button" class="button primary" @onclick="() => StartReadyBulkJobAsync(job.Id)">Запустить проверку</button> }
-                                @if (job.State is "Queued" or "Running") { <button type="button" class="button ghost" @onclick="() => CancelBulkJobAsync(job.Id)">Отменить</button> }
+                                @if (job.State is "Queued" or "Running") { <button type="button" class="button ghost" @onclick="() => PauseBulkJobAsync(job.Id)">Пауза</button> }
+                                @if (job.State == "Paused") { <button type="button" class="button primary" @onclick="() => ContinueBulkJobAsync(job.Id)">Продолжить</button> }
+                                @if (job.State is "Queued" or "Running" or "PauseRequested" or "Paused") { <button type="button" class="button ghost" @onclick="() => CancelBulkJobAsync(job.Id)">Отменить</button> }
                                 @if (job.State == "Partial") { <button type="button" class="button ghost" @onclick="() => RetryBulkJobAsync(job.Id)">Повторить ошибки</button> }
                                 @if (job.State == "Failed" && job.Error?.StartsWith("Недостаточно места", StringComparison.Ordinal) == true) { <button type="button" class="button ghost" @onclick="() => ResumeBulkJobAsync(job.Id)">Продолжить</button> }
-                                @if (job.State is "Ready" or "Completed" or "Partial" or "Canceled" or "Failed") { <button type="button" class="button ghost" @onclick="() => DeleteBulkJobAsync(job.Id)">Удалить</button> }
+                                @if (job.State is "Ready" or "Completed" or "Partial" or "Canceled" or "Failed" or "Paused" or "Deleting") { <button type="button" class="button ghost" disabled="@_bulkDeleting.Contains(job.Id)" @onclick="() => DeleteBulkJobAsync(job.Id)">@(job.State == "Deleting" ? "Повторить удаление" : "Удалить")</button> }
                             </div>
                         </div>
                     }
@@ -146,15 +183,7 @@
                 </div>
             }
 
-            <div class="actions editor-actions submit-actions">
-                <button type="button" class="button primary execute-button" @onclick="ExecuteAsync" disabled="@_running">
-                    <span aria-hidden="true">@(_running ? "◌" : "→")</span>@(_running ? "Выполняется…" : "Получить информацию")
-                </button>
-                @if (_running && _selected.Id is TrueApiBulkCodeInfoHandler.OperationId or TrueApiAggregationTreeHandler.OperationId)
-                {
-                    <button type="button" class="button ghost" @onclick="CancelBulk">Отменить</button>
-                }
-            </div>
+
             @if (_running && _selected.Id == TrueApiAggregationTreeHandler.OperationId)
             {
                 <p role="status" aria-live="polite">@(_treeProgress?.Stage ?? "Подготовка загрузки") · обработано @(_treeProgress?.ProcessedCodes ?? 0) кодов</p>
@@ -162,6 +191,7 @@
             @if (!string.IsNullOrWhiteSpace(_validationError))
             {
                 <p class="error-text" role="alert">@_validationError</p>
+            }
             }
         }
     </section>
@@ -180,9 +210,14 @@
         @if (_selected?.Id == TrueApiBulkCodeInfoHandler.OperationId && _codeResults is not null && _result.Success)
         {
             <h2>Результат запроса</h2>
+            @if (_bulkShippedOnly)
+            {
+                <p class="muted" role="status">Проверено владельцев: @TextShipmentReviewed из @_codeResults.FoundCount. Не удалось определить: @TextShipmentUnknown.</p>
+            }
             <BulkCodeSummary Counts="@TextCounts" SelectedCount="@BulkShownItems.Count"
+                             ShippedCount="@(_bulkShippedOnly && !string.IsNullOrWhiteSpace(_shipmentInn) ? (long?)BulkShownItems.Count : null)"
                              CanPreview="true"
-                             PreviewKey="@($"{_result.CorrelationId}:{string.Join(',', SelectedBulkStatuses.Order())}")"
+                             PreviewKey="@($"{_result.CorrelationId}:{string.Join(',', SelectedBulkStatuses.Order())}:{_bulkShippedOnly}:{(_bulkShippedOnly ? _shipmentRevision : 0)}")"
                              PreviewPageLoader="@PreviewBulkTextAsync" OnDownload="@DownloadBulkTextAsync" />
         }
         else if (!_technicalMode && _selected?.Id != TrueApiBulkCodeInfoHandler.OperationId && _codeResults is not null)
@@ -264,7 +299,7 @@
     {
         [TrueApiAggregationTreeHandler.OperationId] = new("010460000000000021TREE000000001", "code", "010460000000000021TREE000000001"),
         [TrueApiCodeInfoHandler.OperationId] = new("010460000000000021DEMO000000001", "codes", "010460000000000021DEMO000000001"),
-        [TrueApiBulkCodeInfoHandler.OperationId] = new("010460000000000021DEMO000000001\n010460000000000021DEMO000000002", "codes", "Два КМ с разными статусами"),
+        [TrueApiBulkCodeInfoHandler.OperationId] = new("010460000000000021DEMO000000001\n010460000000000021DEMO000000002", "codes", "010460000000000021DEMO000000001\n010460000000000021DEMO000000002"),
         [TrueApiDocumentStatusHandler.OperationId] = new("demo-success", "documentId", "demo-success"),
         [NationalCatalogProductHandler.OperationId] = new("04600000000000", "gtin", "04600000000000"),
         [SuzDocumentStatusHandler.OperationId] = new("00000000-0000-0000-0000-000000000001", "documentId", "00000000-0000-0000-0000-000000000001"),
@@ -286,14 +321,17 @@
     private static string BulkProductGroupName(CisInfo? info) =>
         CodeCorrectionRules.Groups.FirstOrDefault(group => group.Code == info?.ProductGroup || group.Id == info?.ProductGroupId)?.Name
         ?? info?.ProductGroup ?? "—";
-    private readonly HashSet<string> _bulkStatuses = BulkStatuses.Select(x => x.Code).ToHashSet(StringComparer.Ordinal);
-    private bool _bulkPaidOnly = true;
+    private readonly HashSet<string> _bulkStatuses = new(StringComparer.Ordinal);
+    private bool _bulkPaidOnly;
     private HashSet<string> SelectedBulkStatuses
     {
         get
         {
-            var statuses = new HashSet<string>(_bulkStatuses, StringComparer.Ordinal);
-            if (!_bulkPaidOnly) statuses.Add("APPLIED_NOT_PAID");
+            if (_bulkStatuses.Count == 0 && !_bulkPaidOnly) return new(StringComparer.Ordinal);
+            var statuses = _bulkStatuses.Count == 0
+                ? BulkStatuses.Select(x => x.Code).ToHashSet(StringComparer.Ordinal)
+                : new HashSet<string>(_bulkStatuses, StringComparer.Ordinal);
+            if (!_bulkPaidOnly && statuses.Contains("APPLIED")) statuses.Add("APPLIED_NOT_PAID");
             return statuses;
         }
     }
@@ -305,8 +343,14 @@
     private int _bulkJobsVersion;
     private readonly Dictionary<Guid, (long Completed, IReadOnlyDictionary<string, long> Counts)> _bulkStatusCounts = [];
     private Guid? _bulkCountsProfileId;
-    private long SelectedBulkCount(Guid id) => _bulkStatusCounts.TryGetValue(id, out var entry)
-        ? SelectedBulkStatuses.Sum(status => entry.Counts.GetValueOrDefault(status)) : 0;
+    private long SelectedBulkCount(Guid id) => _bulkShippedOnly
+        ? _fileShipments.TryGetValue(id, out var shipment) ? CountSelected(shipment.ShippedCounts) : 0
+        : _bulkStatusCounts.TryGetValue(id, out var entry) ? CountSelected(entry.Counts) : 0;
+    private long CountSelected(IReadOnlyDictionary<string, long> counts)
+    {
+        var statuses = SelectedBulkStatuses;
+        return statuses.Count == 0 ? counts.Values.Sum() : statuses.Sum(status => counts.GetValueOrDefault(status));
+    }
     private IReadOnlyDictionary<string, long> JobCounts(Guid id) => _bulkStatusCounts.TryGetValue(id, out var entry)
         ? entry.Counts : new Dictionary<string, long>();
     private IReadOnlyDictionary<string, long> TextCounts => _codeResults?.Items
@@ -316,12 +360,15 @@
         .ToDictionary(group => group.Key, group => (long)group.Count(), StringComparer.Ordinal)
         ?? new Dictionary<string, long>();
     private bool _bulkUploading;
+    private readonly HashSet<Guid> _bulkDeleting = [];
     private string? _bulkFileError;
     private readonly CancellationTokenSource _bulkPollCancellation = new();
     private List<CodeInfoItem> BulkShownItems { get; set; } = [];
     private void RefreshBulkSelection()
     {
-        BulkShownItems = _codeResults is null ? [] : BulkCodeInfoSelection.Filter(_codeResults, SelectedBulkStatuses).ToList();
+        BulkShownItems = _codeResults is null ? [] : (_bulkShippedOnly
+            ? string.IsNullOrWhiteSpace(_shipmentInn) ? [] : BulkCodeInfoSelection.FilterByOwner(_codeResults, SelectedBulkStatuses, _shipmentInn)
+            : BulkCodeInfoSelection.Filter(_codeResults, SelectedBulkStatuses)).ToList();
     }
     private Task<FileRecordPage> PreviewBulkTextAsync(FilePageCursor? cursor)
     {
@@ -334,7 +381,8 @@
     private Task DownloadBulkTextAsync() => JavaScript.InvokeVoidAsync("crptWorkbench.downloadText",
         "codes.txt", BulkCodeInfoSelection.CopyCodes(BulkShownItems) + "\n").AsTask();
     private Task<FileRecordPage> PreviewBulkJobAsync(Guid id, FilePageCursor? cursor) => Workbench.ProfileId is { } profileId
-        ? BulkFiles.PreviewPageAsync(profileId, id, SelectedBulkStatuses, cursor, _bulkPollCancellation.Token)
+        ? _bulkShippedOnly ? ShipmentFiles.OwnershipPreviewPageAsync(profileId, id, SelectedBulkStatuses, cursor, _bulkPollCancellation.Token)
+            : BulkFiles.PreviewPageAsync(profileId, id, SelectedBulkStatuses, cursor, _bulkPollCancellation.Token)
         : Task.FromResult(new FileRecordPage([], null));
     private void SetBulkStatus(string code, bool selected)
     {
@@ -396,6 +444,7 @@
 
     private bool _unknownOperation;
     private string? _lastQuery;
+    [SupplyParameterFromQuery(Name = "aggregationJob")] public Guid? RequestedAggregationJob { get; set; }
     [SupplyParameterFromQuery(Name = "operation")] public string? RequestedOperation { get; set; }
     [SupplyParameterFromQuery(Name = "code")] public string? RequestedCode { get; set; }
     [SupplyParameterFromQuery(Name = "document")] public string? RequestedDocument { get; set; }
@@ -460,6 +509,11 @@
                 RequestedSource == "suz" ? ApiSystem.Suz : ApiSystem.TrueApi, RequestedProductGroup));
             return;
         }
+        if (RequestedOperation == TrueApiAggregationTreeHandler.OperationId)
+        {
+            SelectOperation(_operations.FirstOrDefault(x => x.Id == TrueApiAggregationTreeHandler.OperationId));
+            return;
+        }
         var destination = OperationNavigation.ResolveConsole(query, _operations);
         if (destination.Code is not null)
             await RequestRelatedCodeAsync(destination.Code);
@@ -478,6 +532,7 @@
 
     private void SelectOperation(ApiOperationDescriptor? operation)
     {
+        StopShipmentCheck(clearText: true);
         _unknownOperation = false;
         _documentLookupNotice = null;
         _documentLookupMissing = false;
@@ -726,6 +781,7 @@
             _bulkStatusCounts.Remove(id);
         foreach (var job in jobs)
         {
+            if (job.State == "Deleting" || _bulkDeleting.Contains(job.Id)) continue;
             if (_bulkStatusCounts.TryGetValue(job.Id, out var cached) && cached.Completed == job.CodesCompleted) continue;
             IReadOnlyDictionary<string, long> counts;
             try
@@ -741,6 +797,7 @@
             _bulkStatusCounts[job.Id] = (job.CodesCompleted, counts);
         }
         await InvokeAsync(StateHasChanged);
+        StartShipmentCheck();
     }
 
     private async Task ResetBulkJobsAsync()
@@ -799,6 +856,27 @@
         await BulkFiles.CancelAsync(profileId, id);
         await RefreshBulkJobsAsync();
     }
+    private async Task PauseBulkJobAsync(Guid id)
+    {
+        if (Workbench.ProfileId is not { } profileId) return;
+        try
+        {
+            StopShipmentCheck();
+            await BulkFiles.PauseAsync(profileId, id);
+            await RefreshBulkJobsAsync();
+        }
+        catch (Exception) { _bulkFileError = "Не удалось поставить задание на паузу. Обновите список и повторите."; }
+    }
+    private async Task ContinueBulkJobAsync(Guid id)
+    {
+        if (Workbench.ProfileId is not { } profileId) return;
+        try
+        {
+            await BulkFiles.ResumeAsync(profileId, id);
+            await RefreshBulkJobsAsync();
+        }
+        catch (Exception) { _bulkFileError = "Не удалось продолжить задание. Обновите список и повторите."; }
+    }
     private async Task StartReadyBulkJobAsync(Guid id)
     {
         if (Workbench.ProfileId is not { } profileId) return;
@@ -822,27 +900,46 @@
 
     private async Task DeleteBulkJobAsync(Guid id)
     {
-        if (Workbench.ProfileId is not { } profileId) return;
-        await BulkFiles.DeleteAsync(profileId, id);
-        await RefreshBulkJobsAsync();
+        if (Workbench.ProfileId is not { } profileId || !_bulkDeleting.Add(id)) return;
+        StopShipmentCheck();
+        _bulkFileError = null;
+        try
+        {
+            await BulkFiles.DeleteAsync(profileId, id);
+            _fileShipments.Remove(id);
+            _bulkStatusCounts.Remove(id);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            _bulkFileError = "Не удалось удалить задание. Закройте его выгрузки и повторите удаление.";
+        }
+        finally
+        {
+            _bulkDeleting.Remove(id);
+            await RefreshBulkJobsAsync();
+        }
     }
 
     private async Task DownloadBulkAsync(Guid id)
     {
         if (Workbench.ProfileId is not { } profileId || SelectedBulkCount(id) == 0 ||
             await BulkFiles.GetAsync(profileId, id) is null) return;
-        var ticket = BulkTickets.Issue(profileId, id, SelectedBulkStatuses);
+        var ticket = _bulkShippedOnly
+            ? BulkTickets.Issue(profileId, id, SelectedBulkStatuses, true, _shipmentInn ?? "", IntegrationOptions.Value.Mode)
+            : BulkTickets.Issue(profileId, id, SelectedBulkStatuses);
         Navigation.NavigateTo($"/bulk-code-download?ticket={Uri.EscapeDataString(ticket)}", forceLoad: true);
     }
 
     private static string BulkStateLabel(string state) => state switch
     {
         "Ready" => "подготовлено", "Queued" => "в очереди", "Running" => "выполняется", "CancelRequested" => "отменяется",
+        "PauseRequested" => "приостанавливается", "Paused" => "на паузе", "Deleting" => "удаляется",
         "Canceled" => "отменено", "Completed" => "готово", "Partial" => "готово с ошибками",
         "Failed" => "ошибка", _ => state
     };
     private void OnProfileChanged(object? sender, Guid? profileId) => _ = InvokeAsync(async () =>
     {
+        StopShipmentCheck(clearText: true, clearFiles: true);
         _executionVersion++;
         _executionCancellation?.Cancel();
         _executionCancellation = null;
@@ -874,6 +971,7 @@
         }
 
         _validationError = null;
+        StopShipmentCheck(clearText: true);
         _running = true;
         _executionCancellation = new CancellationTokenSource();
         var cancellation = _executionCancellation;
@@ -941,6 +1039,7 @@
             {
                 _running = false;
                 _executionCancellation = null;
+                StartShipmentCheck();
             }
         }
     }
@@ -987,6 +1086,7 @@
 
     public ValueTask DisposeAsync()
     {
+        StopShipmentCheck();
         _disposed = true;
         _executionVersion++;
         _executionCancellation?.Cancel();

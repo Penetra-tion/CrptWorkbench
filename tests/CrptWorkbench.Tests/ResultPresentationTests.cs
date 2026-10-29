@@ -14,6 +14,25 @@ namespace CrptWorkbench.Tests;
 public sealed class ResultPresentationTests
 {
     [Fact]
+    public async Task BulkSummaryShowsShipmentSeparatelyFromLifecycleStatus()
+    {
+        await using var services = new ServiceCollection().AddLogging().BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var html = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<BulkCodeSummary>(ParameterView.FromDictionary(new Dictionary<string, object?>
+            {
+                ["Counts"] = new Dictionary<string, long> { ["INTRODUCED"] = 1 },
+                ["SelectedCount"] = 1L,
+                ["ShippedCount"] = 1L
+            }));
+            return WebUtility.HtmlDecode(component.ToHtmlString());
+        });
+        Assert.Contains("Отгружен: 1", html);
+        Assert.Contains("В обороте: 1", html);
+    }
+
+    [Fact]
     public async Task WaterLicencesAppearOnceBesideWellAndWithoutPermitDocuments()
     {
         var withWell = new CisInfo
@@ -211,7 +230,7 @@ public sealed class ResultPresentationTests
         {
             DocumentHistory = new(true,
                 [new("document-id", new DateTimeOffset(2026, 9, 24, 3, 54, 0, TimeSpan.Zero),
-                    "PAYMENT", "ACCEPTED", "Компания", "1234567890", null, null)])
+                    "PAYMENT", "ACCEPTED", "Компания", "1234567890", null, null) { ReceivedAt = new DateTimeOffset(2026, 9, 24, 3, 54, 0, TimeSpan.Zero) }])
         };
         var html = await Render<CodeInfoResultView>(new CodeInfoResults([item]));
         Assert.Contains("Оплачен", html);

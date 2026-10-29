@@ -1,0 +1,16 @@
+.aggregation-jobs, .aggregation-job { min-width: 0; }
+.aggregation-jobs .actions { display:flex; flex-wrap:wrap; gap:.6rem; align-items:center; }
+.aggregation-job { margin-top:1rem; }
+.aggregation-job progress { width:100%; }
+.aggregation-job .aggregation-export { min-width:0; margin:1rem 0; padding:1rem; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface-2); }
+.aggregation-export legend { padding:0 .35rem; color:var(--heading); font-weight:700; }
+.aggregation-export-options { display:flex; flex-wrap:wrap; gap:.5rem; }
+.aggregation-export-option, .aggregation-types label { display:inline-flex; align-items:center; gap:.6rem; min-width:0; margin:0; padding:.65rem .8rem; border:1px solid var(--line); border-radius:9px; background:var(--surface); cursor:pointer; line-height:1.3; }
+.aggregation-export-option:has(input:checked), .aggregation-types label:has(input:checked) { border-color:var(--accent); background:var(--accent-soft); }
+.aggregation-export-option:focus-within, .aggregation-types label:focus-within { outline:2px solid var(--accent); outline-offset:2px; }
+.aggregation-export-option input[type="radio"], .aggregation-types input[type="checkbox"] { flex:none; width:18px; height:18px; min-height:18px; margin:0; padding:0; accent-color:var(--accent); }
+.aggregation-types { display:flex; flex-wrap:wrap; gap:.5rem; margin-top:.75rem; }
+.aggregation-export-footer { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:.75rem; margin-top:1rem; }
+.aggregation-export-footer .muted { margin:0 auto 0 0; }
+.aggregation-job code { overflow-wrap:anywhere; }
+@media (max-width:480px) { .aggregation-export-options { display:grid; } .aggregation-export-option { width:100%; } .aggregation-export-footer .button { width:100%; } }

@@ -232,14 +232,15 @@ public sealed class PackageTransformationTests
         public Uri BaseAddress { get; } = new(mock ? "https://trueapi.mock.invalid" : "https://markirovka.crpt.ru/api/v3/true-api/");
         public List<IntegrationRequest> Requests { get; } = [];
         public IntegrationRequest? LastRequest => Requests.LastOrDefault();
-        public Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
+        public async Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
         {
+            if (request.BeforeDispatchAsync is not null) await request.BeforeDispatchAsync(cancellationToken);
             Requests.Add(request);
             if (FailCreation) throw new HttpRequestException("connection lost");
             var isStatus = request.Method == "GET";
             var body = isStatus ? "[{\"status\":\"CHECKED_OK\",\"errors\":[]}]" : JsonSerializer.Serialize(Guid.NewGuid().ToString());
-            return Task.FromResult(new IntegrationExchange(isStatus ? 200 : 201, request.Method, request.Url, request.Headers, request.Body,
-                new Dictionary<string, string>(), body, TimeSpan.Zero));
+            return new IntegrationExchange(isStatus ? 200 : 201, request.Method, request.Url, request.Headers, request.Body,
+                new Dictionary<string, string>(), body, TimeSpan.Zero);
         }
     }
 }

@@ -13,6 +13,20 @@ namespace CrptWorkbench.Tests;
 
 public sealed class BulkCodeFileJobTests
 {
+    [Fact]
+    public async Task SerialNumberBracketSequencesAreSentWithoutRejection()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        string[] codes = ["0104607167620070215ZsCJggFr(01)", "0104607167626157215a9rD(21)KcO*"];
+        var payload = Encoding.UTF8.GetBytes(string.Join('\n', codes));
+        await using var source = new MemoryStream(payload);
+        var job = await fixture.Service.UploadAsync(DemoProfile, "serial-brackets.txt", payload.Length, source, TestContext.Current.CancellationToken);
+        var client = new FakeClient();
+        await fixture.Processor(client).ProcessNextAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(codes, client.Requests.SelectMany(request => JsonSerializer.Deserialize<string[]>(request.Body!)!));
+        Assert.Empty((await fixture.Service.RejectedPageAsync(DemoProfile, job.Id, cancellationToken: TestContext.Current.CancellationToken)).Items);
+    }
+
     private static readonly Guid DemoProfile = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid OtherProfile = Guid.NewGuid();
     private static readonly CrptIntegrationOptions MockOptions = new() { Mode = CrptIntegrationMode.Mock };
@@ -86,13 +100,14 @@ public sealed class BulkCodeFileJobTests
             var exported = new List<string>();
             await foreach (var code in fixture.Service.ExportAsync(DemoProfile, job.Id, statuses, TestContext.Current.CancellationToken))
                 exported.Add(code);
-            Assert.Equal(exported.Count, statuses.Sum(status => counts.GetValueOrDefault(status)));
+            var expectedCount = statuses.Count == 0 ? counts.Values.Sum() : statuses.Sum(status => counts.GetValueOrDefault(status));
+            Assert.Equal(expectedCount, exported.Count);
         }
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             fixture.Service.CountCodesByStatusAsync(OtherProfile, job.Id, TestContext.Current.CancellationToken));
         Assert.Equal([Code(1), Code(3)], await fixture.Service.PreviewAsync(DemoProfile, job.Id,
             new HashSet<string> { "INTRODUCED" }, TestContext.Current.CancellationToken));
-        Assert.Empty(await fixture.Service.PreviewAsync(DemoProfile, job.Id,
+        Assert.Equal([Code(1), Code(2), Code(3)], await fixture.Service.PreviewAsync(DemoProfile, job.Id,
             new HashSet<string>(), TestContext.Current.CancellationToken));
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.PreviewAsync(OtherProfile, job.Id,
             new HashSet<string> { "INTRODUCED" }, TestContext.Current.CancellationToken));
@@ -221,7 +236,7 @@ public sealed class BulkCodeFileJobTests
     }
 
     [Fact]
-    public async Task InvalidFileStopsBeforeNetworkAndConcurrentBatchesStayBounded()
+    public async Task InvalidRowsAreSkippedBeforeNetworkAndConcurrentBatchesStayBounded()
     {
         await using var fixture = await Fixture.CreateAsync();
         var invalid = Encoding.UTF8.GetBytes(Code(1) + "\n010460000000000021DEMO#00000001\n");
@@ -229,8 +244,12 @@ public sealed class BulkCodeFileJobTests
         var badJob = await fixture.Service.UploadAsync(DemoProfile, "bad.txt", invalid.Length, invalidSource, TestContext.Current.CancellationToken);
         var client = new FakeClient();
         await fixture.Processor(client).ProcessNextAsync(TestContext.Current.CancellationToken);
-        Assert.Equal("Failed", (await fixture.Service.GetAsync(DemoProfile, badJob.Id, TestContext.Current.CancellationToken))!.State);
-        Assert.Empty(client.Requests);
+        Assert.Equal("Completed", (await fixture.Service.GetAsync(DemoProfile, badJob.Id, TestContext.Current.CancellationToken))!.State);
+        Assert.Equal(new[] { Code(1) }, JsonSerializer.Deserialize<string[]>(Assert.Single(client.Requests).Body!));
+        client.Requests.Clear();
+        var rejected = await fixture.Service.RejectedPageAsync(DemoProfile, badJob.Id, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Contains("Строка 2:", Assert.Single(rejected.Items));
+        Assert.Contains("DEMO#", rejected.Items[0]);
 
         var codes = Enumerable.Range(1, 5000).Select(Code);
         var data = Encoding.UTF8.GetBytes(string.Join('\n', codes));
@@ -241,6 +260,67 @@ public sealed class BulkCodeFileJobTests
         Assert.Equal(5, client.Requests.Count);
         Assert.InRange(client.PeakConcurrent, 1, 4);
         Assert.All(client.Requests, request => Assert.InRange(JsonSerializer.Deserialize<string[]>(request.Body!)!.Length, 1, 1000));
+    }
+
+    [Fact]
+    public async Task RejectedRowsArePagedDurableAndProfileScopedWithoutLosingValidCodes()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var rows = Enumerable.Range(1, 250).Select(i => "bad#" + i).ToList();
+        rows.Insert(100, Code(1));
+        rows.Add(new string('X', 10000));
+        rows.Add(Code(2));
+        var bytes = Encoding.UTF8.GetBytes("\uFEFF" + string.Join("\r\n", rows));
+        await using var source = new MemoryStream(bytes);
+        var job = await fixture.Service.UploadAsync(DemoProfile, "invalid.txt", bytes.Length, source, TestContext.Current.CancellationToken);
+        var client = new FakeClient();
+        await fixture.Processor(client).ProcessNextAsync(TestContext.Current.CancellationToken);
+        var completed = (await fixture.Service.GetAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken))!;
+        Assert.Equal("Completed", completed.State);
+        Assert.Equal(rows.Count, completed.LinesRead);
+        Assert.Equal(bytes.Length, completed.NextOffset);
+        Assert.Equal(2, completed.CodesCompleted);
+        Assert.Equal(new[] { Code(1), Code(2) }, JsonSerializer.Deserialize<string[]>(Assert.Single(client.Requests).Body!));
+        var restarted = new BulkCodeFileService(fixture.Jobs, fixture.Files, new ProfileRepository(fixture.Factory), MockOptions);
+        var first = await restarted.RejectedPageAsync(DemoProfile, job.Id, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(100, first.Items.Count);
+        var second = await restarted.RejectedPageAsync(DemoProfile, job.Id, first.NextCursor, TestContext.Current.CancellationToken);
+        Assert.Equal(100, second.Items.Count);
+        var third = await restarted.RejectedPageAsync(DemoProfile, job.Id, second.NextCursor, TestContext.Current.CancellationToken);
+        Assert.Equal(51, third.Items.Count);
+        Assert.Null(third.NextCursor);
+        Assert.Contains("Строка 252:", third.Items[^1]);
+        Assert.Contains("сокращено", third.Items[^1]);
+        Assert.DoesNotContain(Code(1), string.Join('\n', first.Items.Concat(second.Items).Concat(third.Items)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => restarted.RejectedPageAsync(OtherProfile, job.Id, cancellationToken: TestContext.Current.CancellationToken));
+        await fixture.Processor(client).ProcessNextAsync(TestContext.Current.CancellationToken);
+        Assert.Single(client.Requests);
+    }
+
+    [Fact]
+    public async Task InvalidUtf8AndInvalidOnlyBatchesDoNotSendRequestsOrLoseFollowingRows()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var bytes = Encoding.UTF8.GetBytes(string.Join('\n', Enumerable.Repeat("#", 1000)) + "\n")
+            .Concat(new byte[] { 0xff, 0x0a }).Concat(Encoding.UTF8.GetBytes(Code(1))).ToArray();
+        await using var source = new MemoryStream(bytes);
+        var job = await fixture.Service.UploadAsync(DemoProfile, "invalid-utf8.txt", bytes.Length, source, TestContext.Current.CancellationToken);
+        var client = new FakeClient();
+        await fixture.Processor(client).ProcessNextAsync(TestContext.Current.CancellationToken);
+        var completed = (await fixture.Service.GetAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken))!;
+        Assert.Equal("Completed", completed.State);
+        Assert.Equal(1002, completed.LinesRead);
+        Assert.Equal(1, completed.CodesCompleted);
+        Assert.Equal(new[] { Code(1) }, JsonSerializer.Deserialize<string[]>(Assert.Single(client.Requests).Body!));
+        FilePageCursor? cursor = null;
+        var rejected = new List<string>();
+        do
+        {
+            var page = await fixture.Service.RejectedPageAsync(DemoProfile, job.Id, cursor, TestContext.Current.CancellationToken);
+            rejected.AddRange(page.Items); cursor = page.NextCursor;
+        } while (cursor is not null);
+        Assert.Equal(1001, rejected.Count);
+        Assert.Contains("UTF-8", rejected[^1]);
     }
 
     [Fact]
@@ -258,6 +338,27 @@ public sealed class BulkCodeFileJobTests
         Assert.Equal("Completed", (await fixture.Service.GetAsync(DemoProfile, job.Id, TestContext.Current.CancellationToken))!.State);
         var request = Assert.Single(client.Requests);
         Assert.Equal([code], Assert.IsType<string[]>(JsonSerializer.Deserialize<string[]>(request.Body!)));
+    }
+
+    [Fact]
+    public async Task ProcessorPersistsOwnerEvidenceIncludingExplicitlyMissingOwner()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var bytes = Encoding.UTF8.GetBytes(Code(1) + "\n" + Code(2));
+        await using var source = new MemoryStream(bytes);
+        var job = await fixture.Service.UploadAsync(DemoProfile, "owners.txt", bytes.Length, source, ct);
+        await fixture.Processor(new FakeClient(ownerInn: "7700000000")).ProcessNextAsync(ct);
+        var page = await fixture.Files.ReadEntriesPageAsync(job.Id, 1, null, cancellationToken: ct);
+        Assert.Equal(2, page.Items.Count);
+        Assert.All(page.Items, item => Assert.True(item.OwnerKnown));
+        Assert.All(page.Items, item => Assert.Equal("7700000000", item.OwnerInn));
+
+        await using var missingSource = new MemoryStream(bytes);
+        var missing = await fixture.Service.UploadAsync(DemoProfile, "missing-owner.txt", bytes.Length, missingSource, ct);
+        await fixture.Processor(new FakeClient()).ProcessNextAsync(ct);
+        var missingPage = await fixture.Files.ReadEntriesPageAsync(missing.Id, 1, null, cancellationToken: ct);
+        Assert.All(missingPage.Items, item => { Assert.True(item.OwnerKnown); Assert.Null(item.OwnerInn); });
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -298,7 +399,7 @@ public sealed class BulkCodeFileJobTests
         }
     }
 
-    private sealed class FakeClient(bool failSecondOnce = false) : ITrueApiClient
+    private sealed class FakeClient(bool failSecondOnce = false, string? ownerInn = null) : ITrueApiClient
     {
         private int _secondAttempts;
         private int _active;
@@ -317,7 +418,7 @@ public sealed class BulkCodeFileJobTests
                 var status = failSecondOnce && codes.Length == 1 && Interlocked.Increment(ref _secondAttempts) == 1 ? 503 : 200;
                 var body = JsonSerializer.Serialize(codes.Select(code => new CodeInfoItem(new CisInfo
                 {
-                    RequestedCis = code, Cis = code, Status = "INTRODUCED"
+                    RequestedCis = code, Cis = code, Status = "INTRODUCED", OwnerInn = ownerInn
                 })));
                 await Task.Delay(2, cancellationToken);
                 return new IntegrationExchange(status, request.Method, request.Url, request.Headers, request.Body,

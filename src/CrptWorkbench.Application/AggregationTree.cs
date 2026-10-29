@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using CrptWorkbench.Domain;
 
 namespace CrptWorkbench.Application;
 
@@ -24,7 +25,7 @@ public sealed record AggregationTreeResult(string RequestedCode, bool IncludeSib
             var result = JsonSerializer.Deserialize<AggregationTreeResult>(body, JsonOptions);
             return result is not null && !string.IsNullOrWhiteSpace(result.RequestedCode) &&
                 !string.IsNullOrWhiteSpace(result.RootCode) && result.Nodes is not null && result.Links is not null &&
-                result.Diagnostics is not null && result.Nodes.Count <= TrueApiAggregationTreeHandler.MaxCodes &&
+                result.Diagnostics is not null &&
                 result.Nodes.All(n => n is not null && !string.IsNullOrWhiteSpace(n.Code)) &&
                 result.Nodes.Select(n => n.Code).Distinct(StringComparer.Ordinal).Count() == result.Nodes.Count &&
                 result.Links.All(l => l is not null && !string.IsNullOrWhiteSpace(l.Parent) && !string.IsNullOrWhiteSpace(l.Child))
@@ -92,7 +93,26 @@ public sealed record AggregationTreeResult(string RequestedCode, bool IncludeSib
 
     public bool CanExport => ExportPaths().Any();
 
+    public IEnumerable<IReadOnlyList<string>> ExportPaths(AggregationExportOptions options)
+    {
+        if (options.FullTree) return ExportPaths();
+        if (options.PackageTypes is not { Count: > 0 }) throw new ArgumentException("Выберите хотя бы один тип упаковки.");
+        return ProjectPaths(options.PackageTypes.ToHashSet(StringComparer.Ordinal));
+    }
+
+    private IEnumerable<IReadOnlyList<string>> ProjectPaths(HashSet<string> types)
+    {
+        var nodes = Nodes.ToDictionary(n => n.Code, StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var path in ExportPaths())
+        {
+            var selected = path.Where(code => types.Contains(nodes[code].PackageType ?? "")).ToArray();
+            if (selected.Length > 0 && seen.Add(string.Join('\t', selected))) yield return selected;
+        }
+    }
+
     public Stream OpenTxtStream(CancellationToken cancellationToken = default) => new TxtStream(ExportPaths(), cancellationToken);
+    public Stream OpenTxtStream(AggregationExportOptions options, CancellationToken cancellationToken = default) => new TxtStream(ExportPaths(options), cancellationToken);
 
     public async Task WriteTxtAsync(Stream stream, CancellationToken cancellationToken = default)
     {

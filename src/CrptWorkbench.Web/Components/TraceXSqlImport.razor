@@ -28,9 +28,12 @@
             @if (_result is not null)
             {
                 <p role="status">Загружено строк: @_result.Rows.</p>
-                <pre class="tracex-sql-preview">@string.Join('\n', _preview)</pre>
-                <ShowMore VisibleCount="@_preview.Count" TotalCount="@_result.Rows" HasMore="@(_preview.Count < _result.Rows)" Loading="@_previewLoading" Disabled="@_loading" OnMore="LoadPreviewAsync" />
-                @if (_result.Bytes <= MaxBytes)
+                @if (!Bulk)
+                {
+                    <pre class="tracex-sql-preview">@string.Join('\n', _preview)</pre>
+                    <ShowMore VisibleCount="@_preview.Count" TotalCount="@_result.Rows" HasMore="@(_preview.Count < _result.Rows)" Loading="@_previewLoading" Disabled="@_loading" OnMore="LoadPreviewAsync" />
+                }
+                @if (_result.Bytes <= MaxBytes && OnApply.HasDelegate)
                 {
                     <div class="actions">
                         <button type="button" class="button primary" @onclick="() => ApplyAsync(false)" disabled="@(_loading || _previewLoading)">Заменить</button>
@@ -52,6 +55,7 @@
     [Parameter] public bool Disabled { get; set; }
     [Parameter] public EventCallback<(string Text, bool Append)> OnApply { get; set; }
     [Parameter] public EventCallback OnBulkPrepared { get; set; }
+    [Parameter] public EventCallback<(Guid ProfileId, long Bytes, Stream Source)> OnPreparedSource { get; set; }
     private readonly string _inputId = $"tracex-sql-{Guid.NewGuid():N}";
     private bool _configured, _open, _loading;
     private string _query = "";
@@ -153,7 +157,7 @@
             if (Workbench.ProfileId == id && version == _operationVersion)
             {
                 _result = result;
-                await LoadPreviewAsync();
+                if (!Bulk) await LoadPreviewAsync();
             }
             else Imports.Delete(result);
         }
@@ -199,6 +203,13 @@
         _loading = true; _error = null;
         try
         {
+            if (OnPreparedSource.HasDelegate)
+            {
+                await using var preparedSource = Imports.OpenRead(result, result.ProfileId);
+                await OnPreparedSource.InvokeAsync((result.ProfileId, result.Bytes, preparedSource));
+                await CloseAsync();
+                return;
+            }
             BulkCodeJob job;
             await using (var source = Imports.OpenRead(result, result.ProfileId))
                 job = await BulkFiles.PrepareAsync(result.ProfileId, result.Bytes, source, _lifetime.Token);

@@ -197,12 +197,90 @@ public sealed class SuzUtilisationServiceTests
         Assert.DoesNotContain("private-detail", details.Reports[0].Error ?? "");
     }
 
+    [Fact]
+    public async Task IndependentReportsOverlapWithBoundedRequestsAndDurableGuids()
+    {
+        await using var f = await SuzUtilisationPersistenceTests.Fixture.CreateAsync();
+        var job = f.Job();
+        await f.Repository.AddAsync(job, Enumerable.Range(1, 5).Select(i => new SuzUtilisationDraft(
+            new() { JobId = job.Id, Number = i, CodeCount = 1 }, JsonSerializer.Serialize(new { sntins = new[] { "unique-" + i } }))).ToArray(), Ct);
+        var entered = 0;
+        var active = 0;
+        var peak = 0;
+        var firstWave = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new Client(r => Exchange(r, 200, JsonSerializer.Serialize(new { omsId = SuzDocumentStatusHandler.MockOmsId, reportId = Guid.NewGuid() })))
+        {
+            BeforeResponse = async () =>
+            {
+                var current = Interlocked.Increment(ref active);
+                Interlocked.Exchange(ref peak, Math.Max(Volatile.Read(ref peak), current));
+                if (Interlocked.Increment(ref entered) == 4) firstWave.SetResult();
+                await firstWave.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+                Interlocked.Decrement(ref active);
+            }
+        };
+        var service = new SuzUtilisationService(f.Repository, f.Profiles, client, new Signer(), f.Logs, () => CrptIntegrationMode.Mock, TimeProvider.System);
+        var saved = await service.ContinueAsync(f.Profile.Id, job.Id, Ct);
+        Assert.Equal(4, peak);
+        Assert.Equal(5, entered);
+        Assert.All(saved.Reports, report => { Assert.Equal("Tracking", report.State); Assert.NotNull(report.ReportId); });
+    }
+
+    [Fact]
+    public async Task SharedCodesKeepReportsSequential()
+    {
+        await using var f = await SuzUtilisationPersistenceTests.Fixture.CreateAsync();
+        var job = f.Job();
+        await f.Repository.AddAsync(job, Enumerable.Range(1, 2).Select(i => new SuzUtilisationDraft(
+            new() { JobId = job.Id, Number = i, CodeCount = 1 }, "{\"sntins\":[\"same-code\"]}")).ToArray(), Ct);
+        var active = 0;
+        var order = new List<int>();
+        var client = new Client(r => Exchange(r, 200, JsonSerializer.Serialize(new { omsId = SuzDocumentStatusHandler.MockOmsId, reportId = Guid.NewGuid() })))
+        {
+            BeforeResponse = async () =>
+            {
+                Assert.Equal(1, Interlocked.Increment(ref active));
+                order.Add(order.Count + 1);
+                await Task.Yield();
+                Interlocked.Decrement(ref active);
+            }
+        };
+        var service = new SuzUtilisationService(f.Repository, f.Profiles, client, new Signer(), f.Logs, () => CrptIntegrationMode.Mock, TimeProvider.System);
+        var saved = await service.ContinueAsync(f.Profile.Id, job.Id, Ct);
+        Assert.Equal(2, order.Count);
+        Assert.All(saved.Reports, report => Assert.Equal("Tracking", report.State));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellationBeforeTransportDispatchKeepsReportPrepared(bool wrapped)
+    {
+        await using var f = await SuzUtilisationPersistenceTests.Fixture.CreateAsync();
+        var job = f.Job();
+        await f.Repository.AddAsync(job, [new(new() { JobId = job.Id, Number = 1, CodeCount = 1 }, "{}")], Ct);
+        var client = new Client(_ => throw (wrapped
+            ? new TaskCanceledException("HttpClient cancellation", new ApiDispatchNotStartedException(new OperationCanceledException()))
+            : new ApiDispatchNotStartedException(new OperationCanceledException())));
+        var service = new SuzUtilisationService(f.Repository, f.Profiles, client, new Signer(), f.Logs, () => CrptIntegrationMode.Mock, TimeProvider.System);
+        var saved = await service.ContinueAsync(f.Profile.Id, job.Id, Ct);
+        Assert.Equal("Prepared", Assert.Single(saved.Reports).State);
+        Assert.Null(saved.Reports[0].ReportId);
+    }
+
     private static IntegrationExchange Exchange(IntegrationRequest request, int status, string body) => new(status, request.Method, request.Url, request.Headers, request.Body, new Dictionary<string,string>(), body, TimeSpan.Zero);
     private sealed class Client(Func<IntegrationRequest, IntegrationExchange> handler) : ISuzClient
     {
         public Func<IntegrationRequest, IntegrationExchange> Handler { get; set; } = handler;
         public List<IntegrationRequest> Requests { get; } = [];
-        public Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default) { Requests.Add(request); return Task.FromResult(Handler(request)); }
+        public Func<Task>? BeforeResponse { get; init; }
+        public async Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
+        {
+            if (request.BeforeDispatchAsync is not null) await request.BeforeDispatchAsync(cancellationToken);
+            lock (Requests) Requests.Add(request);
+            if (BeforeResponse is not null) await BeforeResponse();
+            return Handler(request);
+        }
     }
     private sealed class Signer : ICertificateSignatureService
     {

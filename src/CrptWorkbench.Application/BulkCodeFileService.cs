@@ -6,6 +6,14 @@ public sealed class BulkCodeFileService(
     IBulkCodeJobRepository jobs, IBulkCodeFileStore files, IProfileRepository profiles,
     CrptIntegrationOptions options)
 {
+    public async Task<FileRecordPage> RejectedPageAsync(Guid profileId, Guid id, FilePageCursor? cursor = null,
+        CancellationToken cancellationToken = default)
+    {
+        var job = await jobs.GetAsync(profileId, id, cancellationToken)
+            ?? throw new InvalidOperationException("Задание не найдено.");
+        return await files.ReadRejectedPageAsync(id, job.NextBatchNumber, cursor, cancellationToken);
+    }
+
     public async Task<BulkCodeJob> UploadAsync(Guid profileId, string fileName, long length, Stream source, CancellationToken cancellationToken)
     {
         if (length <= 0) throw new ArgumentException("Выберите непустой TXT-файл.");
@@ -67,9 +75,15 @@ public sealed class BulkCodeFileService(
 
     public async Task CancelAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default)
     {
-        var job = await jobs.GetAsync(profileId, id, cancellationToken);
-        if (job?.State is "Queued" or "Running") await jobs.SetJobStateAsync(profileId, id, "CancelRequested", null, cancellationToken);
+        if (!await jobs.TransitionStateAsync(profileId, id, options.Mode, ["Paused"], "Canceled", null, cancellationToken))
+            await jobs.TransitionStateAsync(profileId, id, options.Mode, ["Queued", "Running", "PauseRequested"], "CancelRequested", null, cancellationToken);
     }
+
+    public async Task PauseAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default) =>
+        await jobs.TransitionStateAsync(profileId, id, options.Mode, ["Queued", "Running"], "PauseRequested", null, cancellationToken);
+
+    public async Task ResumeAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default) =>
+        await jobs.TransitionStateAsync(profileId, id, options.Mode, ["Paused"], "Queued", null, cancellationToken);
 
     public Task RetryAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default) =>
         jobs.RetryFailuresAsync(profileId, id, cancellationToken);
@@ -78,16 +92,20 @@ public sealed class BulkCodeFileService(
     {
         var job = await jobs.GetAsync(profileId, id, cancellationToken);
         if (job?.State == "Failed" && job.Error?.StartsWith("Недостаточно места", StringComparison.Ordinal) == true)
-            await jobs.SetJobStateAsync(profileId, id, "Queued", null, cancellationToken);
+            await jobs.TransitionStateAsync(profileId, id, options.Mode, ["Failed"], "Queued", null, cancellationToken);
     }
 
     public async Task DeleteAsync(Guid profileId, Guid id, CancellationToken cancellationToken = default)
     {
         var job = await jobs.GetAsync(profileId, id, cancellationToken);
         if (job is null) return;
-        if (job.State is "Queued" or "Running" or "CancelRequested")
+        if (job.Mode != options.Mode) return;
+        if (!await jobs.TransitionStateAsync(profileId, id, options.Mode,
+            ["Ready", "Paused", "Canceled", "Completed", "Partial", "Failed", "Deleting"], "Deleting", null, cancellationToken))
             throw new InvalidOperationException("Сначала отмените и дождитесь остановки задания.");
-        files.Delete(id);
+        // Large jobs can contain tens of thousands of fragments. Keep directory traversal
+        // off the caller's Blazor dispatcher while the durable Deleting claim blocks resume.
+        await Task.Run(() => files.Delete(id), cancellationToken);
         await jobs.DeleteAsync(profileId, id, cancellationToken);
     }
 

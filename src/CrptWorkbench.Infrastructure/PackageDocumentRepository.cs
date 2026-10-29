@@ -59,6 +59,15 @@ public sealed class PackageDocumentRepository(IDbContextFactory<WorkbenchDbConte
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<bool> RenewCheckLeaseAsync(Guid id, long expectedLeaseUntilUnixMs, long nowUnixMs, long leaseUntilUnixMs,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        return await db.PackageDocuments.Where(x => x.Id == id && x.State == "Tracking" &&
+                x.LeaseUntilUnixMs == expectedLeaseUntilUnixMs && x.LeaseUntilUnixMs > nowUnixMs)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.LeaseUntilUnixMs, leaseUntilUnixMs), cancellationToken) == 1;
+    }
+
     public async Task<bool> CompleteCheckAsync(PackageDocument document, long leaseUntilUnixMs,
         CancellationToken cancellationToken = default)
     {

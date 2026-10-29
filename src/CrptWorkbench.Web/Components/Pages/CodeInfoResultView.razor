@@ -175,9 +175,9 @@
                     <details class="code-detail-disclosure code-bottom-disclosure">
                         <summary class="disclosure-toggle">Документы по коду · @documents.Count</summary>
                         <div class="disclosure-content">
-                            <IncrementalList Items="@documents" ResetKey="@documents"><ItemsContent Context="visibleDocuments"><div class="code-history-scroll">
+                            <IncrementalList Items="@documents.OrderBy(document => document.ReceivedAt is null).ThenBy(document => document.ReceivedAt).ToArray()" ResetKey="@documents"><ItemsContent Context="visibleDocuments"><div class="code-history-scroll">
                                 <table class="code-history-table">
-                                    <thead><tr><th>Операция</th><th>Дата обработки</th><th>Идентификатор</th><th>Отправитель</th><th>Получатель</th></tr></thead>
+                                    <thead><tr><th>Операция</th><th>Дата загрузки в ЧЗ</th><th>Идентификатор</th><th>Отправитель</th><th>Получатель</th></tr></thead>
                                     <tbody>
                                         @foreach (var document in visibleDocuments)
                                         {
@@ -186,7 +186,7 @@
                                                     <span class="@(CodeHistoryDocumentLookup.IsValidId(document.DocumentId) ? "code-history-row-label" : null)">@DocumentTypeLabel(document.Type)</span>
                                                     @if (!string.IsNullOrWhiteSpace(document.Status)) { <small class="muted">@DocumentStatusResults.Status(document.Status)</small> }
                                                 </td>
-                                                <td>@FormatDate(document.ProcessedAt)</td>
+                                                <td>@FormatDate(document.ReceivedAt)</td>
                                                 <td class="code-history-id">
                                                     <span class="@(CodeHistoryDocumentLookup.IsValidId(document.DocumentId) ? "code-history-row-label" : null)">@(document.DocumentId ?? "—")</span>
                                                 </td>

@@ -81,6 +81,16 @@ public sealed class BulkCodeInfoTests
     }
 
     [Fact]
+    public void EmptyStatusSelectionIncludesEveryFoundCode()
+    {
+        var results = CodeInfoResults.Parse("[{\"cisInfo\":{\"requestedCis\":\"A\",\"status\":\"INTRODUCED\"}},{\"cisInfo\":{\"requestedCis\":\"B\",\"status\":\"APPLIED_NOT_PAID\"}},{\"cisInfo\":{\"requestedCis\":\"C\",\"status\":\"FUTURE_STATUS\"}},{\"cisInfo\":{\"requestedCis\":\"D\",\"status\":\"INTRODUCED\"},\"errorCode\":\"404\"}]")!;
+
+        var shown = BulkCodeInfoSelection.Filter(results, new HashSet<string>());
+
+        Assert.Equal("A\nB\nC", BulkCodeInfoSelection.CopyCodes(shown));
+    }
+
+    [Fact]
     public async Task ThrottleIsRetriedAndCancellationStopsWork()
     {
         var calls = 0;
@@ -112,7 +122,7 @@ public sealed class BulkCodeInfoTests
         });
         var result = await new TrueApiBulkCodeInfoHandler(client).ExecuteAsync(Input(Enumerable.Range(1, 5000).Select(Code)), Context, TestContext.Current.CancellationToken);
         Assert.Equal(200, result.StatusCode);
-        Assert.InRange(peak, 1, Math.Clamp(Environment.ProcessorCount, 1, 4));
+        Assert.InRange(peak, 1, 4);
     }
 
     private static IntegrationExchange Success(IntegrationRequest request)

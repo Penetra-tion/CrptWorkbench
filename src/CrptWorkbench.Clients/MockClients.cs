@@ -11,6 +11,9 @@ internal static class MockExchangeFactory
     public static async Task<IntegrationExchange> ExecuteAsync(ApiSystem system, IntegrationRequest request, CancellationToken cancellationToken,
         string? responseBody = null, int statusCode = 200)
     {
+        using var heldSlot = await ApiDispatchWait.AcquireAsync(ApiRequestLimiter.Shared,
+            system switch { ApiSystem.TrueApi => ApiConcurrencyService.TrueApi, ApiSystem.NationalCatalog => ApiConcurrencyService.NationalCatalog, _ => ApiConcurrencyService.Suz },
+            request.CanDispatchAsync, request.BeforeDispatchAsync, cancellationToken);
         var stopwatch = Stopwatch.StartNew();
         await Task.Delay(system switch
         {
@@ -78,6 +81,7 @@ internal static class MockExchangeFactory
 
 public sealed class MockTrueApiClient : ITrueApiClient
 {
+    private readonly MockShipmentDocuments _shipmentDocuments = new();
     public Uri BaseAddress { get; } = new("https://production.trueapi.mock.invalid");
 
     private const string UnitOne = "010460000000000021DEMO000000001";
@@ -98,6 +102,8 @@ public sealed class MockTrueApiClient : ITrueApiClient
     public Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (request.OperationId == ShipmentDocumentRequest.OperationId)
+            return _shipmentDocuments.ExecuteAsync(request, cancellationToken);
         if (PackageCreationRequest.IsCreation(request.OperationId))
         {
             var creation = PackageCreationRequest.Validate(request);
@@ -154,6 +160,36 @@ public sealed class MockTrueApiClient : ITrueApiClient
             JsonSerializer.Serialize(items, JsonOptions), items.Any(x => x.ErrorCode is null) ? 200 : 404);
     }
 
+    public async Task<IntegrationExchange> ExecuteToStreamAsync(IntegrationRequest request, Stream destination,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.OperationId != "true-api.aggregation-tree")
+            throw new InvalidOperationException("Streaming is only available for aggregation queries.");
+        using var slot = await ApiDispatchWait.AcquireAsync(ApiRequestLimiter.Shared, ApiConcurrencyService.TrueApi,
+            request.CanDispatchAsync, request.BeforeDispatchAsync, cancellationToken);
+        var started = Stopwatch.StartNew();
+        await Task.Delay(85, cancellationToken);
+        var codes = JsonSerializer.Deserialize<string[]>(request.Body ?? "[]", JsonOptions) ?? [];
+        var found = false;
+        using (var writer = new Utf8JsonWriter(destination))
+        {
+            writer.WriteStartArray();
+            foreach (var code in codes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var item = CreateItem(code);
+                found |= string.IsNullOrEmpty(item.ErrorCode) && string.IsNullOrEmpty(item.ErrorMessage);
+                JsonSerializer.Serialize(writer, item, JsonOptions);
+                await writer.FlushAsync(cancellationToken);
+            }
+            writer.WriteEndArray();
+            await writer.FlushAsync(cancellationToken);
+        }
+        return new(found ? 200 : 404, request.Method, request.Url,
+            new Dictionary<string, string> { ["Authorization"] = "Bearer ********", ["X-Correlation-Id"] = request.CorrelationId },
+            request.Body, new Dictionary<string, string> { ["Content-Type"] = "application/json",
+                ["X-CRPT-Workbench-Mock"] = "true", ["X-Correlation-Id"] = request.CorrelationId }, null, started.Elapsed);
+    }
     private static object CreatePackageDocumentStatus(string id)
     {
         var correctionGroup = id.StartsWith("c0de4", StringComparison.Ordinal) &&

@@ -19,6 +19,7 @@ public sealed class ManualTrueApiTokenProvider(IServiceScopeFactory scopes, IOpt
     }
 
     public void Invalidate(IntegrationAuthenticationContext authentication) { }
+    public void Invalidate(IntegrationAuthenticationContext authentication, string rejectedToken) { }
 }
 
 public sealed class ManualSuzTokenProvider(IServiceScopeFactory scopes, IOptions<CrptIntegrationOptions> options) : ISuzTokenProvider

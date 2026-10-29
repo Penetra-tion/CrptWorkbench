@@ -58,7 +58,7 @@ public static class InputValidation
                     TrueApiBulkCodeInfoHandler.Parse(values);
                     break;
                 case TrueApiAggregationTreeHandler.OperationId:
-                    TrueApiAggregationTreeHandler.Parse(values);
+                    if (!Guid.TryParse(values.GetValueOrDefault("sourceJobId"), out _)) TrueApiAggregationTreeHandler.Parse(values);
                     break;
                 case TrueApiDocumentStatusHandler.OperationId:
                     TrueApiDocumentStatusHandler.Parse(values);

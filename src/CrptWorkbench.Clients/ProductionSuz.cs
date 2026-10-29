@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
@@ -177,7 +177,9 @@ public sealed class RealSuzClient(IHttpClientFactory httpClientFactory, ISuzToke
             throw new InvalidOperationException("Запрос выходит за разрешённые границы API СУЗ.");
         var auth = request.Authentication ?? throw new InvalidOperationException("Не указан профиль авторизации СУЗ.");
         var watch = Stopwatch.StartNew();
-        var token = await tokens.GetTokenAsync(auth, connection, request.CorrelationId, cancellationToken);
+        string token;
+        try { token = await tokens.GetTokenAsync(auth, connection, request.CorrelationId, cancellationToken); }
+        catch (OperationCanceledException exception) { throw new ApiDispatchNotStartedException(exception); }
         var exchange = await SendAsync(uri, request, token, cancellationToken);
         if (request.Method == "GET" && exchange.StatusCode == 401 && options.Value.SuzAuthMode == CrptAuthenticationMode.Auto)
         {
@@ -193,6 +195,7 @@ public sealed class RealSuzClient(IHttpClientFactory httpClientFactory, ISuzToke
         {
         var utilisation = request.OperationId == "suz.utilisation";
         using var message = new HttpRequestMessage(new HttpMethod(request.Method), uri);
+        if (request.BeforeDispatchAsync is not null) message.Options.Set(ApiConcurrencyHandler.BeforeDispatch, request.BeforeDispatchAsync);
         if (utilisation)
         {
             message.Content = new StringContent(request.Body!, Encoding.UTF8, "application/json");
@@ -209,6 +212,7 @@ public sealed class RealSuzClient(IHttpClientFactory httpClientFactory, ISuzToke
             request.OperationId is "suz.utilisation" or "suz.report-info" ? new Dictionary<string, string> { ["Content-Type"] = "application/json" } : response.Headers.Concat(response.Content.Headers).ToDictionary(x => x.Key, x => string.Join(", ", x.Value), StringComparer.OrdinalIgnoreCase),
             request.OperationId is "suz.utilisation" or "suz.report-info" ? SuzUtilisationRequestRules.SafeResponse(body) : body, TimeSpan.Zero);
         }
+        catch (OperationCanceledException exception) when (ApiDispatchNotStartedException.IsPresent(exception)) { throw; }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (OperationCanceledException) { throw new InvalidOperationException("Превышено время ожидания ответа СУЗ."); }
         catch (Exception) { throw new InvalidOperationException("Не удалось получить ответ СУЗ. Проверьте подключение и повторите запрос."); }

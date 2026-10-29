@@ -37,6 +37,7 @@ public sealed class ProductionTrueApiNetworkGuardHandler : DelegatingHandler
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var uri = request.RequestUri;
+        var shipmentBody = ShipmentDocumentRequest.IsVerifiedBodyRequest(request);
         var validMethod = uri?.AbsolutePath switch
         {
             "/api/v3/true-api/auth/key" => request.Method == HttpMethod.Get,
@@ -45,14 +46,14 @@ public sealed class ProductionTrueApiNetworkGuardHandler : DelegatingHandler
             "/api/v3/true-api/cises/history" => request.Method == HttpMethod.Post && CodeHistoryRequestUri.IsAllowed(uri),
             "/api/v3/true-api/lk/documents/create" => request.Method == HttpMethod.Post &&
                 uri.Query.StartsWith("?pg=", StringComparison.Ordinal) && PackageCreationRequest.IsAllowedGroup(uri.Query[4..]),
-            _ when uri is not null && IsDocumentInfoRequest(uri) => request.Method == HttpMethod.Get,
+            _ when uri is not null && (IsDocumentInfoRequest(uri) || shipmentBody) => request.Method == HttpMethod.Get,
             _ => false
         };
 
         if (uri is null || !uri.IsAbsoluteUri || uri.Scheme != Uri.UriSchemeHttps ||
             !string.Equals(uri.Host, "markirovka.crpt.ru", StringComparison.OrdinalIgnoreCase) ||
             uri.Port != 443 || !string.IsNullOrEmpty(uri.UserInfo) ||
-            (!IsDocumentInfoRequest(uri) && uri.AbsolutePath != "/api/v3/true-api/lk/documents/create" &&
+            (!IsDocumentInfoRequest(uri) && !shipmentBody && uri.AbsolutePath != "/api/v3/true-api/lk/documents/create" &&
                 uri.AbsolutePath != "/api/v3/true-api/cises/history" && !string.IsNullOrEmpty(uri.Query)) ||
             !string.IsNullOrEmpty(uri.Fragment) || !validMethod)
         {

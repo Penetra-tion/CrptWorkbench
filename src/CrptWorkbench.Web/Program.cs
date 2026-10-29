@@ -62,7 +62,14 @@ try
     builder.Services.AddScoped<IPackageDocumentRepository, PackageDocumentRepository>();
     builder.Services.AddScoped<ISuzUtilisationRepository, SuzUtilisationRepository>();
     builder.Services.AddScoped<ISuzCodeSpreadsheetReader, SuzCodeSpreadsheetReader>();
+    builder.Services.AddScoped<IAggregationTreeRepository, AggregationTreeRepository>();
+    builder.Services.AddSingleton<IAggregationTreeSourceStore>(new AggregationTreeSourceStore(dataDirectory));
+    builder.Services.AddScoped<AggregationTreeJobService>();
+    builder.Services.AddScoped<AggregationTreeJobProcessor>();
+    builder.Services.AddSingleton<AggregationTreeDownloadTickets>();
+    builder.Services.AddHostedService<AggregationTreeJobWorker>();
     builder.Services.AddScoped<IBulkCodeJobRepository, BulkCodeJobRepository>();
+    builder.Services.AddScoped<IBulkShipmentCheckRepository, BulkShipmentCheckRepository>();
     builder.Services.AddSingleton<IBulkCodeFileStore>(new BulkCodeFileStore(dataDirectory));
     builder.Services.AddSingleton(integrationOptions);
     builder.Services.AddScoped<IFavoriteApiOperationRepository, FavoriteApiOperationRepository>();
@@ -115,6 +122,8 @@ try
     builder.Services.AddScoped<SuzUtilisationService>();
     builder.Services.AddScoped<SuzUtilisationTracker>();
     builder.Services.AddScoped<BulkCodeFileService>();
+    builder.Services.AddScoped<ShipmentCheckService>();
+    builder.Services.AddScoped<BulkShipmentFileService>();
     builder.Services.AddScoped<BulkCodeJobProcessor>();
     builder.Services.AddSingleton<BulkCodeDownloadTickets>();
     builder.Services.AddHostedService<PackageDocumentWorker>();
@@ -123,6 +132,7 @@ try
     builder.Services.AddScoped<WorkbenchContext>();
     builder.Services.AddScoped<ProductionReadinessService>();
 
+    builder.Services.AddSingleton<IApiRequestLimiter>(ApiRequestLimiter.Shared);
     builder.Services.AddTransient<MockOnlyNetworkGuardHandler>();
     builder.Services.AddTransient<ProductionTrueApiNetworkGuardHandler>();
     builder.Services.AddTransient<ProductionNationalCatalogNetworkGuardHandler>();
@@ -136,42 +146,50 @@ try
     builder.Services.AddHttpClient("PermitSgrPublic", client => client.Timeout = TimeSpan.FromSeconds(15))
         .RemoveAllLoggers()
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
-        .AddHttpMessageHandler<PermitDocumentNetworkGuardHandler>();
+        .AddHttpMessageHandler<PermitDocumentNetworkGuardHandler>()
+        .AddHttpMessageHandler(services => new ApiConcurrencyHandler(services.GetRequiredService<IApiRequestLimiter>(), ApiConcurrencyService.PermitSgr));
     builder.Services.AddHttpClient("PermitEaeuPublic", client => client.Timeout = TimeSpan.FromSeconds(15))
         .RemoveAllLoggers()
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
-        .AddHttpMessageHandler<PermitDocumentNetworkGuardHandler>();
+        .AddHttpMessageHandler<PermitDocumentNetworkGuardHandler>()
+        .AddHttpMessageHandler(services => new ApiConcurrencyHandler(services.GetRequiredService<IApiRequestLimiter>(), ApiConcurrencyService.PermitEaeu));
     builder.Services.AddHttpClient("MercuryPublic")
         .RemoveAllLoggers()
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
-        .AddHttpMessageHandler<MercuryNetworkGuardHandler>();
+        .AddHttpMessageHandler<MercuryNetworkGuardHandler>()
+        .AddHttpMessageHandler(services => new ApiConcurrencyHandler(services.GetRequiredService<IApiRequestLimiter>(), ApiConcurrencyService.Mercury));
     builder.Services.AddHttpClient(HttpClientNames.SuzProduction)
         .RemoveAllLoggers()
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
         .AddHttpMessageHandler<MockOnlyNetworkGuardHandler>()
         .AddHttpMessageHandler<ProductionSuzNetworkGuardHandler>()
         .AddHttpMessageHandler<CorrelationIdHandler>()
-        .AddHttpMessageHandler<SuzSafeLoggingHandler>();
+        .AddHttpMessageHandler<SuzSafeLoggingHandler>()
+        .AddHttpMessageHandler(services => new ApiConcurrencyHandler(services.GetRequiredService<IApiRequestLimiter>(), ApiConcurrencyService.Suz));
     builder.Services.AddHttpClient(HttpClientNames.SuzAuthentication)
         .RemoveAllLoggers()
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
         .AddHttpMessageHandler<MockOnlyNetworkGuardHandler>()
         .AddHttpMessageHandler<SuzAuthenticationNetworkGuardHandler>()
         .AddHttpMessageHandler<CorrelationIdHandler>()
-        .AddHttpMessageHandler<SuzSafeLoggingHandler>();
+        .AddHttpMessageHandler<SuzSafeLoggingHandler>()
+        .AddHttpMessageHandler(services => new ApiConcurrencyHandler(services.GetRequiredService<IApiRequestLimiter>(), ApiConcurrencyService.Suz));
     builder.Services.AddHttpClient("CrptPipeline")
         .AddHttpMessageHandler<MockOnlyNetworkGuardHandler>()
         .AddHttpMessageHandler<CorrelationIdHandler>()
         .AddHttpMessageHandler<LoggingHandler>();
     builder.Services.AddHttpClient(HttpClientNames.TrueApiProduction, client => client.BaseAddress = new Uri(integrationOptions.TrueApiBaseUrl.TrimEnd('/') + "/"))
+        .RemoveAllLoggers()
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
         .AddHttpMessageHandler<ProductionTrueApiNetworkGuardHandler>()
         .AddHttpMessageHandler<CorrelationIdHandler>()
-        .AddHttpMessageHandler<LoggingHandler>();
+        .AddHttpMessageHandler<LoggingHandler>()
+        .AddHttpMessageHandler(services => new ApiConcurrencyHandler(services.GetRequiredService<IApiRequestLimiter>(), ApiConcurrencyService.TrueApi));
     builder.Services.AddHttpClient(HttpClientNames.NationalCatalogProduction, client => client.BaseAddress = new Uri(integrationOptions.NationalCatalogBaseUrl.TrimEnd('/') + "/"))
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
         .AddHttpMessageHandler<ProductionNationalCatalogNetworkGuardHandler>()
-        .AddHttpMessageHandler<CorrelationIdHandler>();
+        .AddHttpMessageHandler<CorrelationIdHandler>()
+        .AddHttpMessageHandler(services => new ApiConcurrencyHandler(services.GetRequiredService<IApiRequestLimiter>(), ApiConcurrencyService.NationalCatalog));
 
     var app = builder.Build();
     app.Use(async (context, next) =>
@@ -208,19 +226,80 @@ try
     app.UseAntiforgery();
 
     app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
-    app.MapGet("/bulk-code-download", async (string ticket, BulkCodeDownloadTickets tickets, BulkCodeFileService service, CancellationToken cancellationToken) =>
+    app.MapGet("/bulk-code-download", async (string ticket, BulkCodeDownloadTickets tickets, BulkCodeFileService service,
+        BulkShipmentFileService shipments, CancellationToken cancellationToken) =>
     {
-        if (!tickets.TryRead(ticket, out var profileId, out var jobId, out var statuses) ||
+        if (!tickets.TryRead(ticket, out var profileId, out var jobId, out var statuses, out var shippedOnly, out var inn, out var mode) ||
             await service.GetAsync(profileId, jobId, cancellationToken) is null)
             return Results.NotFound();
+        if (shippedOnly)
+        {
+            try
+            {
+                var summary = await shipments.GetOwnershipSummaryAsync(profileId, jobId, cancellationToken);
+                if (summary.Inn != inn || summary.Mode != mode) return Results.NotFound();
+            }
+            catch (InvalidOperationException) { return Results.NotFound(); }
+        }
         var selected = statuses.ToHashSet(StringComparer.Ordinal);
         return Results.Stream(async output =>
         {
             await using var writer = new StreamWriter(output, new System.Text.UTF8Encoding(true), leaveOpen: true);
-            await foreach (var code in service.ExportAsync(profileId, jobId, selected, cancellationToken))
+            var codes = shippedOnly ? shipments.OwnershipExportAsync(profileId, jobId, selected, cancellationToken, inn, mode)
+                : service.ExportAsync(profileId, jobId, selected, cancellationToken);
+            await foreach (var code in codes)
                 await writer.WriteLineAsync(code.AsMemory(), cancellationToken);
             await writer.FlushAsync(cancellationToken);
         }, "text/plain; charset=utf-8", $"codes-{jobId:N}.txt");
+    });
+    app.MapGet("/bulk-code-rejected-download", async (string ticket, BulkCodeDownloadTickets tickets,
+        BulkCodeFileService service, CancellationToken cancellationToken) =>
+    {
+        if (!tickets.TryRead(ticket, out var profileId, out var jobId, out _) ||
+            await service.GetAsync(profileId, jobId, cancellationToken) is null) return Results.NotFound();
+        return Results.Stream(async output =>
+        {
+            await using var writer = new StreamWriter(output, new System.Text.UTF8Encoding(true), leaveOpen: true);
+            FilePageCursor? cursor = null;
+            do
+            {
+                var page = await service.RejectedPageAsync(profileId, jobId, cursor, cancellationToken);
+                foreach (var line in page.Items) await writer.WriteLineAsync(line.AsMemory(), cancellationToken);
+                cursor = page.NextCursor;
+            } while (cursor is not null);
+            await writer.FlushAsync(cancellationToken);
+        }, "text/plain; charset=utf-8", $"rejected-{jobId:N}.txt");
+    });
+    app.MapGet("/aggregation-tree-download", async (string ticket, AggregationTreeDownloadTickets tickets,
+        AggregationTreeJobService service, CrptIntegrationOptions options, CancellationToken cancellationToken) =>
+    {
+        if (!tickets.TryRead(ticket, false, out var value) || value!.Mode != options.Mode ||
+            await service.GetAsync(value.ProfileId, value.JobId, cancellationToken) is null) return Results.NotFound();
+        try
+        {
+            var stream = await service.OpenExportAsync(value.ProfileId, value.JobId, value.ExportId, cancellationToken);
+            return Results.Stream(stream, "text/plain; charset=utf-8", $"aggregation-{value.JobId:N}.txt");
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException) { return Results.NotFound(); }
+    });
+    app.MapGet("/aggregation-tree-rejected-download", async (string ticket, AggregationTreeDownloadTickets tickets,
+        AggregationTreeJobService service, CrptIntegrationOptions options, CancellationToken cancellationToken) =>
+    {
+        if (!tickets.TryRead(ticket, true, out var value) || value!.Mode != options.Mode ||
+            await service.GetAsync(value.ProfileId, value.JobId, cancellationToken) is null) return Results.NotFound();
+        return Results.Stream(async output =>
+        {
+            await using var writer = new StreamWriter(output, new System.Text.UTF8Encoding(true), leaveOpen: true);
+            long? cursor = null;
+            do
+            {
+                var page = await service.RejectedAsync(value.ProfileId, value.JobId, cursor, cancellationToken);
+                foreach (var row in page.Items)
+                    await writer.WriteLineAsync($"{row.Line}\t{row.Value}\t{row.Reason}".AsMemory(), cancellationToken);
+                cursor = page.NextCursor;
+            } while (cursor is not null);
+            await writer.FlushAsync(cancellationToken);
+        }, "text/plain; charset=utf-8", $"aggregation-rejected-{value.JobId:N}.txt");
     });
     app.MapGet("/health/ready", async (ProductionReadinessService readiness, CancellationToken cancellationToken) =>
     {

@@ -57,16 +57,33 @@ public sealed class SuzUtilisationService(ISuzUtilisationRepository repository, 
         if (!await repository.ClaimSubmissionAsync(jobId, owner, cancellationToken)) throw new ArgumentException("Отправка этого задания уже выполняется.");
         try
         {
-            foreach (var report in details.Reports.Where(x => x.State == "Prepared").OrderBy(x => x.Number))
+            var prepared = details.Reports.Where(x => x.State == "Prepared").OrderBy(x => x.Number).ToArray();
+            var payloads = new System.Collections.Concurrent.ConcurrentDictionary<Guid, string>();
+            await IndependentDocumentDispatch.RunAsync(prepared, async report =>
+            {
+                var payload = await repository.ReadSubmissionPayloadAsync(jobId, report.Id, owner, cancellationToken);
+                if (payload is null) return null;
+                payloads[report.Id] = payload;
+                try
+                {
+                    using var document = JsonDocument.Parse(payload);
+                    if (!document.RootElement.TryGetProperty("sntins", out var codes) || codes.ValueKind != JsonValueKind.Array) return null;
+                    var values = codes.EnumerateArray().Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() : null).ToArray();
+                    return values.Length == 0 || values.Any(string.IsNullOrEmpty) ? null : values.Select(x => x!).ToHashSet(StringComparer.Ordinal);
+                }
+                catch (JsonException) { return null; }
+            }, async (report, canDispatch, stopDispatch) =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                string? json = await repository.StartReportAsync(jobId, report.Id, owner, cancellationToken);
-                if (json is null) break;
+                if (!payloads.TryRemove(report.Id, out var json)) return false;
+                json = await repository.StartReportAsync(jobId, report.Id, owner, cancellationToken);
+                if (json is null) return false;
                 report.State = "Unknown";
                 report.Error = "Исход отправки неизвестен. Повторная отправка заблокирована.";
                 IntegrationExchange? exchange = null;
                 var duration = Stopwatch.StartNew();
                 var dispatched = false;
+                var enteredClient = false;
                 try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -74,8 +91,17 @@ public sealed class SuzUtilisationService(ISuzUtilisationRepository repository, 
                     var request = Request(details.Job, profile, OperationId, "POST", $"api/v3/utilisation?omsId={Oms(details.Job)}", json,
                         new Dictionary<string, string> { ["X-Signature"] = signature });
                     cancellationToken.ThrowIfCancellationRequested();
-                    dispatched = true;
+                    if (!canDispatch()) { report.State = "Prepared"; report.Error = null; return false; }
+                    request = request with { BeforeDispatchAsync = token =>
+                    {
+                        token.ThrowIfCancellationRequested();
+                        if (!canDispatch()) throw new OperationCanceledException("Submission stopped before dispatch.");
+                        dispatched = true;
+                        return Task.CompletedTask;
+                    }};
+                    enteredClient = true;
                     exchange = await client.ExecuteAsync(request, cancellationToken);
+                    dispatched = true;
                     if (exchange.StatusCode is >= 200 and < 300)
                     {
                         using var body = JsonDocument.Parse(exchange.ResponseBody ?? "{}");
@@ -89,17 +115,20 @@ public sealed class SuzUtilisationService(ISuzUtilisationRepository repository, 
                     else if (exchange.StatusCode is >= 400 and < 500 && exchange.StatusCode != 408)
                     { report.State = "Rejected"; report.Error = $"СУЗ отклонил запрос (HTTP {exchange.StatusCode})."; }
                 }
+                catch (OperationCanceledException exception) when (IndependentDocumentDispatch.WasNotDispatched(exception))
+                { report.State = "Prepared"; report.Error = null; }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                { if (!dispatched) { report.State = "Prepared"; report.Error = null; } }
+                { if (!dispatched && !enteredClient) { report.State = "Prepared"; report.Error = null; } }
                 catch (Exception)
-                { if (!dispatched) { report.State = "Rejected"; report.Error = "Не удалось подготовить подпись отчёта. Запрос не отправлен."; } }
+                { if (!dispatched && !enteredClient) { report.State = "Rejected"; report.Error = "Не удалось подготовить подпись отчёта. Запрос не отправлен."; } }
                 finally
                 {
+                    if (report.State != "Tracking") stopDispatch();
                     await repository.CompleteSubmissionAsync(report, CancellationToken.None);
                     await RecordAsync(details.Job, report, OperationId, "POST", exchange?.StatusCode, CancellationToken.None, duration.ElapsedMilliseconds);
                 }
-                if (report.State != "Tracking") break;
-            }
+                return report.State == "Tracking";
+            }, cancellationToken);
         }
         finally { await repository.ReleaseSubmissionAsync(jobId, owner, CancellationToken.None); }
         return await GetAsync(profileId, jobId, CancellationToken.None) ?? details;

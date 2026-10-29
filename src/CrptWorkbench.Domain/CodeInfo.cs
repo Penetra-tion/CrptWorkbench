@@ -18,7 +18,10 @@ public sealed record CodeHistoryDocument(
     string? SenderName,
     string? SenderInn,
     string? ReceiverName,
-    string? ReceiverInn);
+    string? ReceiverInn)
+{
+    public DateTimeOffset? ReceivedAt { get; init; }
+}
 
 public sealed record CodeInfoPermitDocument
 {

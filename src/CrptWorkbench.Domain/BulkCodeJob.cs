@@ -45,6 +45,8 @@ public interface IBulkCodeJobRepository
     Task CompleteBatchAsync(Guid jobId, long number, int found, int errors, CancellationToken cancellationToken);
     Task FailBatchAsync(Guid jobId, long number, string error, CancellationToken cancellationToken);
     Task SetJobStateAsync(Guid profileId, Guid id, string state, string? error, CancellationToken cancellationToken);
+    Task<bool> TransitionStateAsync(Guid profileId, Guid id, CrptIntegrationMode mode, IReadOnlyList<string> expectedStates, string state, string? error, CancellationToken cancellationToken);
+    Task<bool> TryBeginBatchAsync(Guid profileId, Guid id, CrptIntegrationMode mode, long number, CancellationToken cancellationToken);
     Task<bool> StartReadyAsync(Guid profileId, Guid id, CancellationToken cancellationToken);
     Task RetryFailuresAsync(Guid profileId, Guid id, CancellationToken cancellationToken);
     Task DeleteAsync(Guid profileId, Guid id, CancellationToken cancellationToken);
@@ -52,6 +54,11 @@ public interface IBulkCodeJobRepository
 
 public interface IBulkCodeFileStore
 {
+    Task WriteOwnedFragmentAsync(Guid jobId, long batchNumber, IReadOnlyList<BulkCodeEntry> entries, int found, int errors, CancellationToken cancellationToken) =>
+        WriteFragmentAsync(jobId, batchNumber, entries.Select(x => (x.Status, x.Code)).ToArray(), found, errors, cancellationToken);
+    Task WriteRejectedAsync(Guid jobId, long batchNumber, IReadOnlyList<string> lines, CancellationToken cancellationToken) => throw new NotSupportedException();
+    Task<FileRecordPage> ReadRejectedPageAsync(Guid jobId, long batchCount, FilePageCursor? cursor, CancellationToken cancellationToken) => throw new NotSupportedException();
+    Task<BulkCodeEntryPage> ReadEntriesPageAsync(Guid jobId, long batchCount, IReadOnlySet<string>? statuses, FilePageCursor? cursor = null, CancellationToken cancellationToken = default, int take = 100, FilePageCursor? endCursor = null) => throw new NotSupportedException();
     Task<FileRecordPage> ReadPageAsync(Guid jobId, long batchCount, IReadOnlySet<string> statuses, FilePageCursor? cursor = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     Task SaveSourceAsync(Guid jobId, Stream source, CancellationToken cancellationToken);
     Stream OpenSource(Guid jobId, long offset);

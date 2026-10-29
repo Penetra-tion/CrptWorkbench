@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Security.Cryptography.Pkcs;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
@@ -26,7 +26,11 @@ public sealed class CryptoProCertificateSignatureService(
     private const string Gost2001_DigestOid = "1.2.643.2.2.9";
 
     private static readonly UTF8Encoding Utf8WithoutBom = new(false, true);
-    public Task<string> SignAttachedPkcs7Base64Async(
+    public Task<string> SignAttachedPkcs7Base64Async(string data, string thumbprint, CancellationToken cancellationToken = default) =>
+        CertificateSigningCoordinator.ExecuteAsync(NormalizeThumbprint(thumbprint), () => SignAttachedCoreAsync(data, thumbprint, cancellationToken), cancellationToken);
+    public Task<string> SignDetachedPkcs7Base64Async(string data, string thumbprint, CancellationToken cancellationToken = default) =>
+        CertificateSigningCoordinator.ExecuteAsync(NormalizeThumbprint(thumbprint), () => SignDetachedCoreAsync(data, thumbprint, cancellationToken), cancellationToken);
+    private Task<string> SignAttachedCoreAsync(
         string data,
         string thumbprint,
         CancellationToken cancellationToken = default)
@@ -56,7 +60,7 @@ public sealed class CryptoProCertificateSignatureService(
         return Task.FromResult(result);
     }
 
-    public Task<string> SignDetachedPkcs7Base64Async(string data, string thumbprint, CancellationToken cancellationToken = default)
+    private Task<string> SignDetachedCoreAsync(string data, string thumbprint, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrEmpty(data)) throw new ArgumentException("Data for signing was not provided.", nameof(data));

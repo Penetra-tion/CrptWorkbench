@@ -90,7 +90,7 @@ internal static class CodeCorrectionValidation
     internal static string? CodeError(string code)
     {
         if (code.Length is < 18 or > 74) return "Длина кода должна быть от 18 до 74 символов.";
-        if (!Regex.IsMatch(code, "^[A-Za-z0-9%&'\"()*+,_./:;<=>?!-]+$", RegexOptions.CultureInvariant) || code.Contains("(01)", StringComparison.Ordinal) || code.Contains("(21)", StringComparison.Ordinal))
+        if (!Regex.IsMatch(code, "^[A-Za-z0-9%&'\"()*+,_./:;<=>?!-]+$", RegexOptions.CultureInvariant) || MarkingCodeFormat.HasBracketedApplicationIdentifiers(code))
             return "Укажите нормализованный код без пробелов, управляющих символов и скобок вокруг 01/21.";
         return null;
     }

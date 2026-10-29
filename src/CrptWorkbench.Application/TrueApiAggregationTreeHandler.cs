@@ -4,14 +4,13 @@ using CrptWorkbench.Domain;
 
 namespace CrptWorkbench.Application;
 
-public sealed class TrueApiAggregationTreeHandler(ITrueApiClient client) : IApiOperationHandler
+public sealed class TrueApiAggregationTreeHandler(ITrueApiClient client, AggregationTreeJobService? jobs = null) : IApiOperationHandler
 {
     public const string OperationId = "true-api.aggregation-tree";
-    public const int MaxCodes = 100_000;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public ApiOperationDescriptor Descriptor { get; } = new(OperationId, "Получение полного дерева агрегации",
-        ApiSystem.TrueApi, "POST", "Вложения кода и цепочка родителей, с возможностью загрузить соседние ветви.",
+        ApiSystem.TrueApi, "POST", "Фоновая загрузка деревьев списка кодов и выгрузка выбранных типов упаковки.",
         typeof(AggregationTreeRequest), typeof(AggregationTreeResult),
         [new("code", "Код", "КИ, КиЗ, КИГУ, КИН, КИТУ или АТК", HelpText:
             "Один код от 18 до 74 символов. Mock: 010460000000000021TREE000000001 или 000000000000000201."),
@@ -30,6 +29,23 @@ public sealed class TrueApiAggregationTreeHandler(ITrueApiClient client) : IApiO
     public async Task<IntegrationExchange> ExecuteAsync(IReadOnlyDictionary<string, string> values,
         ApiOperationContext context, CancellationToken cancellationToken)
     {
+        if (jobs is not null)
+        {
+            AggregationTreeJob job;
+            if (Guid.TryParse(values.GetValueOrDefault("sourceJobId"), out var prepared))
+                job = await jobs.GetAsync(context.Profile.Id, prepared, cancellationToken) ?? throw new ArgumentException("Задание не найдено.");
+            else
+            {
+                var parsed = Parse(values);
+                using var source = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(parsed.Code));
+                job = await jobs.PrepareAsync(context.Profile.Id, "Введённый код", source, cancellationToken);
+            }
+            var siblings = values.GetValueOrDefault("includeSiblings") == "true";
+            if (!await jobs.StartAsync(context.Profile.Id, job.Id, siblings, cancellationToken))
+                throw new ArgumentException("Задание уже запущено или остановлено.");
+            return new(202, "POST", "aggregation-tree-job", new Dictionary<string, string>(), null,
+                new Dictionary<string, string>(), JsonSerializer.Serialize(new { kind = "aggregation-tree-job", jobId = job.Id, state = "Queued" }, JsonOptions), TimeSpan.Zero);
+        }
         var input = Parse(values);
         var watch = Stopwatch.StartNew();
         var states = new Dictionary<string, NodeState>(StringComparer.Ordinal);
@@ -38,19 +54,12 @@ public sealed class TrueApiAggregationTreeHandler(ITrueApiClient client) : IApiO
         var diagnostics = new HashSet<string>(StringComparer.Ordinal);
         var processed = 0;
         var stop = false;
-        var limited = false;
         var root = input.Code;
         var ascent = new HashSet<string>(StringComparer.Ordinal);
 
-        NodeState? Reserve(string code)
+        NodeState Reserve(string code)
         {
             if (states.TryGetValue(code, out var existing)) return existing;
-            if (states.Count >= MaxCodes)
-            {
-                limited = true;
-                diagnostics.Add("Достигнут предел 100 000 кодов. Часть дерева не загружена.");
-                return null;
-            }
             var state = new NodeState(code);
             states.Add(code, state);
             return state;
@@ -65,7 +74,7 @@ public sealed class TrueApiAggregationTreeHandler(ITrueApiClient client) : IApiO
             var results = new BatchResult?[batches.Length];
             await Parallel.ForEachAsync(Enumerable.Range(0, batches.Length),
                 new ParallelOptions { CancellationToken = cancellationToken,
-                    MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 4) },
+                    MaxDegreeOfParallelism = 4 },
                 async (index, token) =>
                 {
                     if (Volatile.Read(ref stop)) return;
@@ -128,11 +137,7 @@ public sealed class TrueApiAggregationTreeHandler(ITrueApiClient client) : IApiO
             if (!state.Attempted) await Fetch([root], "Поиск верхней упаковки");
             if (!ascent.Add(root)) { state.Error = "Цикл в цепочке родителей."; break; }
             if (!state.Loaded || state.Error is not null || stop || state.Parent is null) break;
-            if (Reserve(state.Parent) is null)
-            {
-                state.Error = "Верхний родитель не загружен из-за ограничения размера.";
-                break;
-            }
+            Reserve(state.Parent);
             AddLink(state.Parent, root);
             root = state.Parent;
         }
@@ -153,7 +158,7 @@ public sealed class TrueApiAggregationTreeHandler(ITrueApiClient client) : IApiO
                 if (!state.Loaded || state.Error is not null) continue;
                 foreach (var child in state.Children)
                 {
-                    if (Reserve(child) is null) continue;
+                    Reserve(child);
                     AddLink(code, child);
                     if (!expanded.Contains(child)) queue.Enqueue(child);
                 }
@@ -185,7 +190,7 @@ public sealed class TrueApiAggregationTreeHandler(ITrueApiClient client) : IApiO
         var nodes = states.Values.Select(s => new AggregationTreeNode(s.Code, s.Type, s.Status, s.Loaded,
             s.Error ?? (!s.Loaded ? "Узел не загружен." : null), s.Children.Length,
             s.Children.Count(c => !links.ContainsKey((s.Code, c))))).ToArray();
-        var complete = !limited && !stop && nodes.All(n => n.Loaded && n.Error is null) && links.Values.All(l => l.Confirmed);
+        var complete = !stop && nodes.All(n => n.Loaded && n.Error is null) && links.Values.All(l => l.Confirmed);
         if (nodes.Any(n => n.Error is not null)) diagnostics.Add("Часть узлов недоступна или содержит противоречивые сведения. Проблемные пути исключены из TXT.");
         var tree = new AggregationTreeResult(input.Code, input.IncludeSiblings, root, nodes, links.Values.ToArray(), complete, diagnostics.ToArray());
         watch.Stop();
@@ -201,7 +206,10 @@ public sealed class TrueApiAggregationTreeHandler(ITrueApiClient client) : IApiO
         var request = new IntegrationRequest(OperationId, "POST", client.BaseAddress.AbsoluteUri.TrimEnd('/') + "/cises/info",
             new Dictionary<string, string> { ["Accept"] = "application/json", ["Content-Type"] = "application/json",
                 ["X-Correlation-Id"] = context.CorrelationId }, JsonSerializer.Serialize(codes, JsonOptions), context.CorrelationId,
-            new(context.Profile.Id, context.Profile.Inn, context.Profile.CertificateThumbprint));
+            new(context.Profile.Id, context.Profile.Inn, context.Profile.CertificateThumbprint))
+        {
+            CanDispatchAsync = _ => Task.FromResult(!shouldStop())
+        };
         for (var attempt = 0; attempt < 3; attempt++)
         {
             token.ThrowIfCancellationRequested();
@@ -209,6 +217,8 @@ public sealed class TrueApiAggregationTreeHandler(ITrueApiClient client) : IApiO
             IntegrationExchange exchange;
             try { exchange = await client.ExecuteAsync(request, token); }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+            catch (Exception exception) when (ApiDispatchNotStartedException.IsPresent(exception))
+            { return new(null, exchanges, 403, "Загрузка остановлена из-за ошибки доступа.", false); }
             catch (Exception)
             {
                 // Never expose raw transport text, credentials or response fragments as diagnostics.
@@ -220,7 +230,8 @@ public sealed class TrueApiAggregationTreeHandler(ITrueApiClient client) : IApiO
             exchanges.Add(exchange);
             if (exchange.StatusCode == 429 && attempt < 2)
             {
-                await Task.Delay(TimeSpan.FromSeconds(1 << attempt), token);
+                if (!await ApiReadRetry.WaitAsync(exchange.ResponseHeaders, attempt, token, _ => Task.FromResult(!shouldStop())))
+                    return new(null, exchanges, 403, "Загрузка остановлена из-за ошибки доступа.", false);
                 continue;
             }
             if (exchange.StatusCode is not (>= 200 and < 300) and not 404)
@@ -270,7 +281,7 @@ public sealed class TrueApiAggregationTreeHandler(ITrueApiClient client) : IApiO
     }
 
     private static bool ValidCode(string code) => code.Length is >= 18 and <= 74 && !code.Any(char.IsControl) &&
-        !code.Contains("(01)", StringComparison.Ordinal) && !code.Contains("(21)", StringComparison.Ordinal);
+        !MarkingCodeFormat.HasBracketedApplicationIdentifiers(code);
 
     private sealed class NodeState(string code)
     {

@@ -36,6 +36,34 @@ public sealed class ProfileRepository(IDbContextFactory<WorkbenchDbContext> fact
 
 public sealed class ApiRequestLogRepository(IDbContextFactory<WorkbenchDbContext> factory) : IApiRequestLogRepository
 {
+    public async Task<RecordPage<ApiRequestLogSummary>> ListSummaryPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var query = db.ApiRequestLogs.AsNoTracking().Where(x => x.ProfileId == profileId);
+        var total = await query.LongCountAsync(cancellationToken);
+        if (cursor is not null)
+        {
+            var boundaryIds = cursor.BoundaryIds.ToArray();
+            query = query.Where(x => x.CreatedAtUnixMs < cursor.CreatedAtUnixMs ||
+                (x.CreatedAtUnixMs == cursor.CreatedAtUnixMs && !boundaryIds.Contains(x.Id)));
+        }
+        // Project before materialization: even large response/exchange bodies stay on disk until selected.
+        var rows = await query.OrderByDescending(x => x.CreatedAtUnixMs).ThenBy(x => x.Id)
+            .Select(x => new ApiRequestLogSummary(x.Id, x.CreatedAt, x.CreatedAtUnixMs,
+                x.System, x.OperationId, x.StatusCode, x.DurationMs, x.Success))
+            .Take(RecordPage<ApiRequestLogSummary>.Size + 1).ToListAsync(cancellationToken);
+        var items = rows.Take(RecordPage<ApiRequestLogSummary>.Size).ToArray();
+        RecordPageCursor? next = null;
+        if (rows.Count > RecordPage<ApiRequestLogSummary>.Size)
+        {
+            var timestamp = items[^1].CreatedAtUnixMs;
+            var ids = items.Where(x => x.CreatedAtUnixMs == timestamp).Select(x => x.Id);
+            if (cursor?.CreatedAtUnixMs == timestamp) ids = cursor.BoundaryIds.Concat(ids);
+            next = new(timestamp, ids.ToArray());
+        }
+        return new(items, next, total);
+    }
+
     public async Task<RecordPage<ApiRequestLog>> ListPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);

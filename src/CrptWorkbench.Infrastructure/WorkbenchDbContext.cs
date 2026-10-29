@@ -19,6 +19,9 @@ public sealed class WorkbenchDbContext(DbContextOptions<WorkbenchDbContext> opti
     public DbSet<PackageDocument> PackageDocuments => Set<PackageDocument>();
     public DbSet<BulkCodeJob> BulkCodeJobs => Set<BulkCodeJob>();
     public DbSet<BulkCodeBatch> BulkCodeBatches => Set<BulkCodeBatch>();
+    public DbSet<BulkShipmentCheck> BulkShipmentChecks => Set<BulkShipmentCheck>();
+    public DbSet<BulkShipmentCheckProgressEntity> BulkShipmentCheckProgresses => Set<BulkShipmentCheckProgressEntity>();
+    public DbSet<BulkShipmentCheckCounter> BulkShipmentCheckCounters => Set<BulkShipmentCheckCounter>();
 
     public DbSet<SuzUtilisationJob> SuzUtilisationJobs => Set<SuzUtilisationJob>();
     public DbSet<SuzUtilisationReport> SuzUtilisationReports => Set<SuzUtilisationReport>();
@@ -66,6 +69,7 @@ public sealed class WorkbenchDbContext(DbContextOptions<WorkbenchDbContext> opti
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ConfigureSuzUtilisation(modelBuilder);
+        ConfigureBulkShipmentChecks(modelBuilder);
         modelBuilder.Entity<CrptProfile>(entity =>
         {
             entity.HasKey(x => x.Id);
@@ -130,6 +134,51 @@ public sealed class WorkbenchDbContext(DbContextOptions<WorkbenchDbContext> opti
             entity.HasKey(x => new { x.JobId, x.Number });
             entity.HasIndex(x => new { x.JobId, x.State });
             entity.Property(x => x.State).HasMaxLength(32).IsRequired();
+            entity.HasOne<BulkCodeJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    internal static void ConfigureBulkShipmentChecks(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<BulkShipmentCheck>(entity =>
+        {
+            entity.ToTable("BulkShipmentChecks");
+            entity.HasKey(x => new { x.ProfileId, x.JobId, x.Mode, x.Inn, x.Code });
+            entity.Property(x => x.ProfileId).HasColumnType("TEXT");
+            entity.Property(x => x.JobId).HasColumnType("TEXT");
+            entity.Property(x => x.Mode).HasColumnType("INTEGER");
+            entity.Property(x => x.Inn).HasColumnType("TEXT").HasMaxLength(12).IsRequired();
+            entity.Property(x => x.Code).HasColumnType("TEXT").HasMaxLength(74).IsRequired();
+            entity.Property(x => x.State).HasColumnType("INTEGER");
+            entity.Property(x => x.CheckedAt).HasColumnType("TEXT");
+            entity.Property(x => x.Reason).HasColumnType("TEXT").HasMaxLength(256);
+            entity.HasOne<BulkCodeJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<BulkShipmentCheckProgressEntity>(entity =>
+        {
+            entity.ToTable("BulkShipmentCheckProgresses");
+            entity.HasKey(x => new { x.ProfileId, x.JobId, x.Mode, x.Inn });
+            entity.Property(x => x.ProfileId).HasColumnType("TEXT");
+            entity.Property(x => x.JobId).HasColumnType("TEXT");
+            entity.Property(x => x.Mode).HasColumnType("INTEGER");
+            entity.Property(x => x.Inn).HasColumnType("TEXT").HasMaxLength(12).IsRequired();
+            entity.Property(x => x.NextBatchNumber).HasColumnType("INTEGER");
+            entity.Property(x => x.ByteOffset).HasColumnType("INTEGER");
+            entity.Property(x => x.Completed).HasColumnType("INTEGER");
+            entity.Property(x => x.ReviewedRows).HasColumnType("INTEGER");
+            entity.HasOne<BulkCodeJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<BulkShipmentCheckCounter>(entity =>
+        {
+            entity.ToTable("BulkShipmentCheckCounters");
+            entity.HasKey(x => new { x.ProfileId, x.JobId, x.Mode, x.Inn, x.State, x.Status });
+            entity.Property(x => x.ProfileId).HasColumnType("TEXT");
+            entity.Property(x => x.JobId).HasColumnType("TEXT");
+            entity.Property(x => x.Mode).HasColumnType("INTEGER");
+            entity.Property(x => x.Inn).HasColumnType("TEXT").HasMaxLength(12).IsRequired();
+            entity.Property(x => x.State).HasColumnType("INTEGER");
+            entity.Property(x => x.Status).HasColumnType("TEXT").HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Count).HasColumnType("INTEGER");
             entity.HasOne<BulkCodeJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
         });
     }

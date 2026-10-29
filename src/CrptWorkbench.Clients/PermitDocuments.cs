@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -77,9 +77,9 @@ public sealed class PermitDocumentNetworkGuardHandler : DelegatingHandler
 
 public sealed class MockPermitDocumentClient : IPermitDocumentClient
 {
-    public Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
+    public async Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
+        using var slot = await ApiRequestLimiter.Shared.AcquireAsync(ApiConcurrencyService.PermitEaeu, cancellationToken);
         var number = PermitDocumentNumbers.Parse(request.Headers["X-Permit-Number"]);
         var type = number.Kind switch
         {
@@ -95,9 +95,9 @@ public sealed class MockPermitDocumentClient : IPermitDocumentClient
             "Локальный пример", "https://nsi.eaeunion.org/portal/1995/card/");
         var body = JsonSerializer.Serialize(new PermitDocumentResult(number.Value, found ? "found" : "not_found", DateTimeOffset.UtcNow,
             found ? [item] : [], null, "https://nsi.eaeunion.org/portal/1995/card/"));
-        return Task.FromResult(new IntegrationExchange(found ? 200 : 404, "GET", request.Url, request.Headers, null,
+        return new IntegrationExchange(found ? 200 : 404, "GET", request.Url, request.Headers, null,
             new Dictionary<string, string> { ["Content-Type"] = "application/json", ["X-Correlation-Id"] = request.CorrelationId,
-                ["X-CRPT-Workbench-Mock"] = "true" }, body, TimeSpan.Zero));
+                ["X-CRPT-Workbench-Mock"] = "true" }, body, TimeSpan.Zero);
     }
 }
 

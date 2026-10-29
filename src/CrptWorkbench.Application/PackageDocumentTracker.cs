@@ -13,14 +13,13 @@ public sealed class PackageDocumentTracker(
 {
     public async Task PollDueAsync(CancellationToken cancellationToken = default)
     {
-        // Claim immediately before checking: leases for queued documents must not
-        // expire while earlier slow HTTP requests are still being processed.
-        for (var checkedCount = 0; checkedCount < 10; checkedCount++)
+        for (var checkedCount = 0; checkedCount < 10;)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var due = await repository.ClaimDueAsync(clock.GetUtcNow().ToUnixTimeMilliseconds(), 1, cancellationToken);
+            var due = await repository.ClaimDueAsync(clock.GetUtcNow().ToUnixTimeMilliseconds(), Math.Min(4, 10 - checkedCount), cancellationToken);
             if (due.Count == 0) break;
-            await PollAsync(due[0], cancellationToken);
+            checkedCount += due.Count;
+            await Task.WhenAll(due.Select(item => PollAsync(item, cancellationToken)));
         }
     }
 
@@ -28,6 +27,15 @@ public sealed class PackageDocumentTracker(
     {
         var now = clock.GetUtcNow();
         var leaseUntilUnixMs = item.LeaseUntilUnixMs ?? throw new InvalidOperationException("Document check requires a lease.");
+        await using var lease = new TrackingLeaseHeartbeat(clock, async token =>
+        {
+            var current = clock.GetUtcNow().ToUnixTimeMilliseconds();
+            var next = Math.Max(current + 120_000, leaseUntilUnixMs + 1);
+            if (!await repository.RenewCheckLeaseAsync(item.Id, leaseUntilUnixMs, current, next, token)) return false;
+            leaseUntilUnixMs = next;
+            return true;
+        }, cancellationToken);
+        cancellationToken = lease.Token;
         if (item.DocumentId is null || item.TrackingUntilUnixMs <= now.ToUnixTimeMilliseconds())
         {
             item.State = "Paused";
@@ -73,6 +81,7 @@ public sealed class PackageDocumentTracker(
         }
         finally
         {
+            await lease.StopAsync();
             var completedAt = clock.GetUtcNow();
             if (request is not null) item.LastCheckedAtUnixMs = completedAt.ToUnixTimeMilliseconds();
             item.PollCount++;
@@ -84,8 +93,8 @@ public sealed class PackageDocumentTracker(
             }
             else item.NextCheckAtUnixMs = null;
             item.LeaseUntilUnixMs = null;
-            await repository.CompleteCheckAsync(item, leaseUntilUnixMs, CancellationToken.None);
-            if (request is not null)
+            var saved = !lease.OwnershipLost && await repository.CompleteCheckAsync(item, leaseUntilUnixMs, CancellationToken.None);
+            if (saved && request is not null)
                 await history.RecordAsync(item, request, exchange, string.IsNullOrEmpty(item.Error) ? null : item.Error,
                     stopwatch.ElapsedMilliseconds, CancellationToken.None);
         }

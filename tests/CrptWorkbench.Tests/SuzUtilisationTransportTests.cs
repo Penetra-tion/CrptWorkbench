@@ -21,6 +21,39 @@ public sealed class SuzUtilisationTransportTests
         public void Invalidate(IntegrationAuthenticationContext auth, SuzConnectionContext connection, string token) => Invalidations++;
     }
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueuedCreationCancellationRemainsDefinitelyNotDispatched(bool cancelOuterToken)
+    {
+        var limiter = new ApiRequestLimiter();
+        var slots = new List<IDisposable>();
+        var sent = 0;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        using var handler = new ApiConcurrencyHandler(limiter, ApiConcurrencyService.Suz)
+        {
+            InnerHandler = new SuzTransportTests.Handler(_ => { sent++; return SuzTransportTests.Reply(200, "{}"); })
+        };
+        try
+        {
+            for (var i = 0; i < 4; i++) slots.Add(await limiter.AcquireAsync(ApiConcurrencyService.Suz, TestContext.Current.CancellationToken));
+            var client = new RealSuzClient(new SuzTransportTests.Factory(handler), new Tokens(), SuzTransportTests.OptionsFor());
+            var stopped = false;
+            var pending = client.ExecuteAsync(Creation() with
+            {
+                BeforeDispatchAsync = _ => stopped ? throw new OperationCanceledException("Another document failed.") : Task.CompletedTask
+            }, cancellation.Token);
+            Assert.False(pending.IsCompleted);
+            stopped = true;
+            if (cancelOuterToken) cancellation.Cancel();
+            slots[0].Dispose();
+            var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+            Assert.True(ApiDispatchNotStartedException.IsPresent(exception));
+            Assert.Equal(0, sent);
+        }
+        finally { foreach (var slot in slots) slot.Dispose(); }
+    }
+
+    [Theory]
     [InlineData(CrptAuthenticationMode.Auto)]
     [InlineData(CrptAuthenticationMode.Manual)]
     public async Task CreationSendsExactBytesAndNeverRetries401(CrptAuthenticationMode mode)

@@ -124,6 +124,9 @@ public sealed class ProfileService(
 
 public sealed class HistoryService(IApiRequestLogRepository repository)
 {
+    public Task<RecordPage<ApiRequestLogSummary>> ListSummaryPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default) =>
+        repository.ListSummaryPageAsync(profileId, cursor, cancellationToken);
+
     public Task<RecordPage<ApiRequestLog>> ListPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default) =>
         repository.ListPageAsync(profileId, cursor, cancellationToken);
 

@@ -50,7 +50,8 @@ public sealed class PackageAggregationService(PackageDocumentService documents)
         var profile = await documents.GetProfileAsync(profileId, cancellationToken);
         var drafts = parsed.Rows.GroupBy(x => x.Package, StringComparer.Ordinal).Select(package => new PackageDocumentDraft(
             package.Key, package.Count(), JsonSerializer.Serialize(new AggregationDocumentBody(profile.Inn!,
-                [new AggregationUnit(package.Key, packageType == "SET" ? null : "AGGREGATION", package.Select(x => x.Item).ToArray())])))).ToArray();
+                [new AggregationUnit(package.Key, packageType == "SET" ? null : "AGGREGATION", package.Select(x => x.Item).ToArray())])),
+            package.Select(x => x.Item).Append(package.Key).ToHashSet(StringComparer.Ordinal))).ToArray();
         return await documents.SubmitAsync(profile, group, PackageOperationKind.Aggregation, "AGGREGATION", packageType, drafts, cancellationToken);
     }
 

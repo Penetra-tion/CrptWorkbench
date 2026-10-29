@@ -56,6 +56,25 @@ public sealed class SuzUtilisationPersistenceTests
         Assert.Equal("Finished", (await f.Repository.GetAsync(f.Profile.Id, CrptIntegrationMode.Mock, job.Id, Ct))!.Reports[0].State);
     }
     [Fact]
+    public async Task TrackingLeaseRenewalExcludesOthersAndRejectsExpiredOrReplacedOwner()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var job = f.Job();
+        var report = new SuzUtilisationReport { JobId = job.Id, Number = 1, CodeCount = 1, State = "Tracking", ReportId = Guid.NewGuid().ToString(), NextCheckAtUnixMs = 1, TrackingUntilUnixMs = 1000000 };
+        await f.Repository.AddAsync(job, [new(report, "{}")], Ct);
+        var claimed = Assert.Single(await f.Repository.ClaimDueAsync(2, 1, Ct));
+        var owner = claimed.TrackingOwner!.Value;
+        Assert.True(await f.Repository.RenewCheckLeaseAsync(report.Id, owner, 90002, 210002, Ct));
+        Assert.Empty(await f.Repository.ClaimDueAsync(120003, 1, Ct));
+        Assert.False(await f.Repository.RenewCheckLeaseAsync(report.Id, Guid.NewGuid(), 100002, 220002, Ct));
+        Assert.False(await f.Repository.RenewCheckLeaseAsync(report.Id, owner, 210002, 330002, Ct));
+        var replacement = Assert.Single(await f.Repository.ClaimDueAsync(210003, 1, Ct));
+        Assert.False(await f.Repository.RenewCheckLeaseAsync(report.Id, owner, 210004, 330004, Ct));
+        Assert.False(await f.Repository.CompleteCheckAsync(claimed, owner, Ct));
+        Assert.True(await f.Repository.CompleteCheckAsync(replacement, replacement.TrackingOwner!.Value, Ct));
+    }
+
+    [Fact]
     public async Task EqualTimestampPagesStableAtHundred()
     {
         await using var f = await Fixture.CreateAsync();

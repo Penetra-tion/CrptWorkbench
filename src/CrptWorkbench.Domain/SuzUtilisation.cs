@@ -50,11 +50,13 @@ public interface ISuzUtilisationRepository
     Task<IReadOnlyList<SuzUtilisationJob>> GetManyAsync(Guid profileId, CrptIntegrationMode mode, IReadOnlyList<Guid> ids, CancellationToken cancellationToken = default);
     Task<bool> ClaimSubmissionAsync(Guid jobId, Guid owner, CancellationToken cancellationToken = default);
     Task ReleaseSubmissionAsync(Guid jobId, Guid owner, CancellationToken cancellationToken = default);
+    Task<string?> ReadSubmissionPayloadAsync(Guid jobId, Guid reportId, Guid owner, CancellationToken cancellationToken = default);
     Task<string?> StartReportAsync(Guid jobId, Guid reportId, Guid owner, CancellationToken cancellationToken = default);
     Task CompleteSubmissionAsync(SuzUtilisationReport report, CancellationToken cancellationToken = default);
     Task RecoverSendingAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SuzUtilisationReport>> ClaimDueAsync(long now, int take, CancellationToken cancellationToken = default);
     Task<SuzUtilisationJob?> GetJobForTrackingAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<bool> CompleteCheckAsync(SuzUtilisationReport report, Guid owner, CancellationToken cancellationToken = default);
+    Task<bool> RenewCheckLeaseAsync(Guid reportId, Guid owner, long nowUnixMs, long leaseUntilUnixMs, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     Task<bool> ScheduleAsync(Guid profileId, CrptIntegrationMode mode, Guid reportId, long now, bool resume, CancellationToken cancellationToken = default);
 }

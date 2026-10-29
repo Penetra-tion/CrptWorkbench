@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -65,9 +65,9 @@ public sealed class MercuryNetworkGuardHandler : DelegatingHandler
 
 public sealed class MockMercuryClient : IMercuryClient
 {
-    public Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
+    public async Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
+        using var slot = await ApiRequestLimiter.Shared.AcquireAsync(ApiConcurrencyService.Mercury, cancellationToken);
         var uid = request.Url.Split("uuid=", 2)[1];
         var found = uid == "0000-0000-0000-0000-0000-0000-0000-0001";
         var body = found ? JsonSerializer.Serialize(new
@@ -76,9 +76,9 @@ public sealed class MockMercuryClient : IMercuryClient
             gtin = "04670011191828", productName = "Масло сливочное (тестовый пример)", volume = "50.4 кг",
             expiry = "30.10.2026", packages = new[] { "Потребительский уровень", "Штука (PP), 280 шт." }
         }) : null;
-        return Task.FromResult(new IntegrationExchange(found ? 200 : 404, "GET", request.Url, request.Headers, null,
+        return new IntegrationExchange(found ? 200 : 404, "GET", request.Url, request.Headers, null,
             new Dictionary<string, string> { ["Content-Type"] = "application/json", ["X-Correlation-Id"] = request.CorrelationId,
-                ["X-CRPT-Workbench-Mock"] = "true" }, body, TimeSpan.Zero));
+                ["X-CRPT-Workbench-Mock"] = "true" }, body, TimeSpan.Zero);
     }
 }
 

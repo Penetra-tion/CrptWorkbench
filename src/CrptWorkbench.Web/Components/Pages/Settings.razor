@@ -77,7 +77,7 @@
             </section>
 
             <section class="panel form-section">
-                <span class="eyebrow">True API · боевой контур</span><h2>True API</h2>
+                <span class="eyebrow">True API · @(IntegrationOptions.Value.Mode == CrptIntegrationMode.Production ? "боевой контур" : "mock")</span><h2>True API</h2>
                 <label>Боевой Base URL<input value="@IntegrationOptions.Value.TrueApiBaseUrl" readonly /></label>
                 <small class="muted">Адрес задаётся конфигурацией службы и не редактируется из интерфейса.</small>
                 @if (IntegrationOptions.Value.TrueApiAuthMode == CrptAuthenticationMode.Manual)

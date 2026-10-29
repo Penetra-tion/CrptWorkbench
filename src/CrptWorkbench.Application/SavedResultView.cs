@@ -14,7 +14,8 @@ public sealed record SavedResultView(
     SuzDocumentStatusResults? SuzDocuments = null,
     MercuryVsdInfoResult? MercuryVsd = null,
     PermitDocumentResult? PermitDocument = null,
-    AggregationTreeResult? AggregationTree = null)
+    AggregationTreeResult? AggregationTree = null,
+    Guid? AggregationJobId = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -53,6 +54,11 @@ public sealed record SavedResultView(
 
     private static SavedResultView FromAggregationTree(ApiRequestLog log)
     {
+        using var document = JsonDocument.Parse(log.ResponseBody!);
+        var root = document.RootElement;
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("kind", out var kind) && kind.ValueKind == JsonValueKind.String && kind.GetString() == "aggregation-tree-job" &&
+            root.TryGetProperty("jobId", out var id) && id.ValueKind == JsonValueKind.String && id.TryGetGuid(out var jobId) && jobId != Guid.Empty)
+            return new(null, null, null, [], null, AggregationJobId: jobId);
         var result = AggregationTreeResult.Parse(log.ResponseBody);
         return result is null ? Invalid() : new(null, null, null, [], null, AggregationTree: result);
     }

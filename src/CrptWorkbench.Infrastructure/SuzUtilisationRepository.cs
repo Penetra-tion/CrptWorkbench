@@ -52,6 +52,13 @@ public sealed class SuzUtilisationRepository(IDbContextFactory<WorkbenchDbContex
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await db.SuzUtilisationJobs.Where(x => x.Id == jobId && x.SubmissionOwner == owner).ExecuteUpdateAsync(s => s.SetProperty(x => x.SubmissionOwner, (Guid?)null), cancellationToken);
     }
+    public async Task<string?> ReadSubmissionPayloadAsync(Guid jobId, Guid reportId, Guid owner, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        if (!await db.SuzUtilisationJobs.AnyAsync(x => x.Id == jobId && x.SubmissionOwner == owner, cancellationToken)) return null;
+        var payload = await db.SuzUtilisationReports.Where(x => x.Id == reportId && x.JobId == jobId && x.State == "Prepared").Select(x => x.ProtectedPayload).SingleOrDefaultAsync(cancellationToken);
+        return payload is null ? null : protector.Unprotect(payload);
+    }
     public async Task<string?> StartReportAsync(Guid jobId, Guid reportId, Guid owner, CancellationToken cancellationToken = default)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -90,6 +97,15 @@ public sealed class SuzUtilisationRepository(IDbContextFactory<WorkbenchDbContex
     }
     public async Task<SuzUtilisationJob?> GetJobForTrackingAsync(Guid jobId, CancellationToken cancellationToken = default)
     { await using var db = await factory.CreateDbContextAsync(cancellationToken); return await db.SuzUtilisationJobs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == jobId, cancellationToken); }
+    public async Task<bool> RenewCheckLeaseAsync(Guid reportId, Guid owner, long nowUnixMs, long leaseUntilUnixMs,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        return await db.SuzUtilisationReports.Where(x => x.Id == reportId && x.State == "Tracking" &&
+                x.TrackingOwner == owner && x.LeaseUntilUnixMs > nowUnixMs)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.LeaseUntilUnixMs, leaseUntilUnixMs), cancellationToken) == 1;
+    }
+
     public async Task<bool> CompleteCheckAsync(SuzUtilisationReport report, Guid owner, CancellationToken cancellationToken = default)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);

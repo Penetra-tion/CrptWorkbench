@@ -20,7 +20,7 @@
             <tbody>
                 @foreach (var item in _items)
                 {
-                    <tr class="request-row @(_selected?.Id == item.Id ? "selected" : null)" role="link" tabindex="0" aria-label="@($"Открыть запрос: {OperationName(item.OperationId)}")" aria-current="@(_selected?.Id == item.Id ? "true" : null)" @onclick="() => OpenHistory(item.Id)" @onkeydown="args => OnRowKeyDown(args, item.Id)"><td>@item.CreatedAt.ToLocalTime().ToString("dd.MM HH:mm:ss")</td><td>@SystemName(item.System)</td><td><a class="history-operation-link" href="@($"/history?id={item.Id}")" tabindex="-1" @onclick:stopPropagation="true">@OperationName(item.OperationId)</a></td><td><span class="status @(item.Success ? "ok" : "fail")">@(item.StatusCode?.ToString() ?? "ERR")</span></td><td>@item.DurationMs</td></tr>
+                    <tr class="request-row @(_selected?.Id == item.Id ? "selected" : null)" role="link" tabindex="0" aria-label="@($"Открыть запрос: {OperationName(item.OperationId)}")" aria-current="@(_selected?.Id == item.Id ? "true" : null)" @onclick="() => OpenHistory(item.Id)" @onkeydown="args => OnRowKeyDown(args, item.Id)"><td>@item.CreatedAt.ToLocalTime().ToString("dd.MM HH:mm:ss")</td><td>@SystemName(item.System)</td><td><a class="history-operation-link" href="@($"/history?id={item.Id}#history-detail")" tabindex="-1" @onclick:stopPropagation="true">@OperationName(item.OperationId)</a></td><td><span class="status @(item.Success ? "ok" : "fail")">@(item.StatusCode?.ToString() ?? "ERR")</span></td><td>@item.DurationMs</td></tr>
                 }
             </tbody></table>
             <ShowMore VisibleCount="@_items.Count" TotalCount="@_totalCount" HasMore="@_hasMore" Loading="@_loadingMore" OnMore="LoadMoreAsync" />
@@ -30,7 +30,7 @@
 
     @if (_items.Count > 0 || _missing)
     {
-    <section class="panel detail">
+    <section id="history-detail" class="panel detail" tabindex="-1">
         @if (_missing) { <div class="notice error" role="alert">Запись не найдена в выбранном профиле. Выберите другой запрос в списке.</div> }
         else if (_selected is null) { <div class="empty">Выберите запрос в списке.</div> }
         else
@@ -48,6 +48,7 @@
                 {
                     <CodeInfoResultView Results="@_result.Codes" OnCodeSelected="RequestRelatedCode" OnGtinSelected="RequestGtin" OnDocumentSelected="RequestDocument" OnPermitSelected="RequestPermit" ShowOwnCodeAction="@(_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId)" />
                 }
+                else if (_result?.AggregationJobId is { } jobId) { <a class="button primary" href="@($"/console?operation=true-api.aggregation-tree&aggregationJob={jobId}")">Открыть задание агрегации</a> }
                 else if (_result?.AggregationTree is not null) { <AggregationTreeResultView Result="_result.AggregationTree" /> }
                 else if (_result?.Product is not null) { <NationalCatalogProductResultView Result="_result.Product" /> }
                 else if (_result?.Documents is not null) { <DocumentStatusResultView Results="_result.Documents" /> }
@@ -88,7 +89,7 @@
 </div>
 
 @code {
-    private IReadOnlyList<ApiRequestLog> _items = [];
+    private IReadOnlyList<ApiRequestLogSummary> _items = [];
     private IReadOnlyDictionary<string, string> _names = new Dictionary<string, string>();
     private ApiRequestLog? _selected;
     private SavedResultView? _result;
@@ -126,7 +127,7 @@
         {
             if (profileId is Guid id)
             {
-                var page = await HistoryService.ListPageAsync(id);
+                var page = await HistoryService.ListSummaryPageAsync(id);
                 if (version != _loadVersion || profileId != Workbench.ProfileId) return;
                 _items = page.Items;
                 _cursor = page.NextCursor;
@@ -151,7 +152,7 @@
         _listError = null;
         try
         {
-            var page = await HistoryService.ListPageAsync(profileId, _cursor);
+            var page = await HistoryService.ListSummaryPageAsync(profileId, _cursor);
             if (version != _loadVersion || profileId != Workbench.ProfileId) return;
             _items = _items.Concat(page.Items).DistinctBy(item => item.Id).ToArray();
             _cursor = page.NextCursor;
@@ -178,13 +179,19 @@
         {
             if (Guid.TryParse(rawId.ToString(), out var id))
             {
-                var item = _items.FirstOrDefault(x => x.Id == id) ?? await HistoryService.GetAsync(profileId.Value, id);
+                var item = await HistoryService.GetAsync(profileId.Value, id);
                 if (version != _selectionVersion || profileId != Workbench.ProfileId) return;
                 SetSelected(item, item is null);
             }
             else SetSelected(null, true);
         }
-        else SetSelected(_items.FirstOrDefault(), false);
+        else
+        {
+            var firstId = _items.FirstOrDefault()?.Id;
+            var item = firstId is { } id ? await HistoryService.GetAsync(profileId.Value, id) : null;
+            if (version != _selectionVersion || profileId != Workbench.ProfileId) return;
+            SetSelected(item, item is null && firstId is not null);
+        }
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => _ = InvokeAsync(async () =>
@@ -199,7 +206,7 @@
         StateHasChanged();
     });
 
-    private void OpenHistory(Guid id) => Navigation.NavigateTo($"/history?id={id}");
+    private void OpenHistory(Guid id) => Navigation.NavigateTo($"/history?id={id}#history-detail");
     private void RequestRelatedCode(string code) => Navigation.NavigateTo($"/console?code={Uri.EscapeDataString(code)}", forceLoad: true);
     private void RequestDocument(CodeHistoryDocumentSelection selection) => Navigation.NavigateTo(
         QueryHelpers.AddQueryString(OperationNavigation.DocumentUrl(selection), "returnTo", SelectedReturnUrl()));

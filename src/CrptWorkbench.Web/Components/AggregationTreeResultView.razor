@@ -4,8 +4,13 @@
 <div class="aggregation-result">
     <div class="panel-title">
         <div><h2>Дерево агрегации</h2><p class="muted">@Result.Nodes.Count кодов · @(Result.IncludeSiblings ? "все доступные ветви" : "вложения введённого кода и его родители")</p></div>
-        <button type="button" class="button ghost" disabled="@(!_canExport || _downloading)" @onclick="DownloadAsync">@(_downloading ? "Подготовка…" : "Скачать агрегацию TXT")</button>
+        <button type="button" class="button ghost" disabled="@(!_canExport || _downloading || !_fullTree && _selectedTypes.Count == 0)" @onclick="DownloadAsync">@(_downloading ? "Подготовка…" : "Скачать агрегацию TXT")</button>
     </div>
+    <fieldset><legend>Состав TXT</legend>
+        <label><input type="radio" name="legacy-aggregation-export" checked="@_fullTree" @onchange="() => _fullTree = true" />Полное дерево</label>
+        <label><input type="radio" name="legacy-aggregation-export" checked="@(!_fullTree)" @onchange="() => _fullTree = false" />Выбранные типы упаковки</label>
+        @if (!_fullTree) { @foreach (var type in _types) { <label><input type="checkbox" checked="@_selectedTypes.Contains(type)" @onchange="args => SelectType(type, args.Value is true)" />@PackageLabel(type)</label> } }
+    </fieldset>
     @if (!Result.Complete)
     {
         <div class="notice" role="status"><strong>Частичный результат.</strong> TXT содержит только подтверждённые пути; ошибочные и незагруженные ветви исключены.</div>
@@ -53,13 +58,18 @@
     private IncrementalAggregationRows? _rowBuilder;
     private readonly Dictionary<string, int> _childLimits = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _lifetime = new();
-    private bool _canExport, _downloading;
+    private bool _canExport, _downloading, _fullTree = true;
+    private string[] _types = [];
+    private readonly HashSet<string> _selectedTypes = new(StringComparer.Ordinal);
+    private void SelectType(string type, bool selected) { if (selected) _selectedTypes.Add(type); else _selectedTypes.Remove(type); }
     private string? _downloadError;
 
     protected override void OnParametersSet()
     {
         if (ReferenceEquals(Result, _previous)) return;
         _previous = Result;
+        _types = Result.Nodes.Select(n => n.PackageType ?? "").Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        _selectedTypes.Clear(); _fullTree = true;
         _expanded.Clear();
         _childLimits.Clear();
         _rowBuilder = new(Result);
@@ -106,7 +116,9 @@
         _downloadError = null;
         try
         {
-            using var stream = Result.OpenTxtStream(_lifetime.Token);
+            var options = new AggregationExportOptions(_fullTree, _selectedTypes.ToArray());
+            if (!Result.ExportPaths(options).Any()) { _downloadError = "Подтверждённых путей для выбранных типов нет."; return; }
+            using var stream = Result.OpenTxtStream(options, _lifetime.Token);
             using var reference = new DotNetStreamReference(stream);
             await JavaScript.InvokeVoidAsync("crptWorkbench.downloadStream", _lifetime.Token, "aggregation.txt", reference);
         }

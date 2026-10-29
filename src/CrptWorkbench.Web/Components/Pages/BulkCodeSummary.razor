@@ -2,6 +2,10 @@
 
 <div class="bulk-summary">
     <div class="bulk-summary-counts" aria-label="Количество КМ по статусам">
+        @if (ShippedCount is { } shipped)
+        {
+            <span class="outcome-badge tone-info" title="Владелец отличается от ИНН активного профиля или не указан">Отгружен: @shipped</span>
+        }
         @foreach (var entry in Counts.OrderBy(x => x.Key, StringComparer.Ordinal))
         {
             <span class="outcome-badge @Tone(entry.Key)">@CodeInfoResults.StatusLabel(entry.Key): @entry.Value</span>
@@ -9,7 +13,7 @@
     </div>
     <div class="bulk-summary-actions">
         <strong>КМ по выбранным фильтрам: @SelectedCount</strong>
-        <button type="button" class="button ghost" disabled="@(SelectedCount == 0)" @onclick="OnDownload">Скачать КМ выбранных статусов</button>
+        <button type="button" class="button ghost" disabled="@(SelectedCount == 0)" @onclick="OnDownload">Скачать КМ по выбранным фильтрам</button>
     </div>
     @if (CanPreview)
     {
@@ -19,7 +23,7 @@
             {
                 @if (_preview is not null)
                 {
-                    @if (_preview.Count == 0) { <p class="muted">Нет КМ для выбранных статусов.</p> }
+                    @if (_preview.Count == 0) { <p class="muted">Нет КМ для выбранных фильтров.</p> }
                     else { <div class="bulk-preview-codes" aria-label="Предпросмотр кодов маркировки">@foreach (var previewCode in _preview) { <div>@previewCode</div> }</div> }
                 }
                 <ShowMore VisibleCount="@(_preview?.Count ?? 0)" TotalCount="@SelectedCount" HasMore="@(_loadedKey is null || _cursor is not null)" Loading="@_loading" OnMore="LoadMoreAsync" />
@@ -32,6 +36,7 @@
 @code {
     [Parameter, EditorRequired] public IReadOnlyDictionary<string, long> Counts { get; set; } = new Dictionary<string, long>();
     [Parameter] public long SelectedCount { get; set; }
+    [Parameter] public long? ShippedCount { get; set; }
     [Parameter] public bool CanPreview { get; set; }
     [Parameter] public string PreviewKey { get; set; } = "";
     [Parameter, EditorRequired] public EventCallback OnDownload { get; set; }

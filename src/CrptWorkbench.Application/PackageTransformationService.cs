@@ -86,7 +86,7 @@ public sealed class PackageTransformationService(PackageDocumentService document
                 reaggregation_type = action,
                 uitu = package.Key,
                 uit_uitu_list = package.Select(x => new { uit_uitu = x.NestedPackage ? null : x.Item, kitu = x.NestedPackage ? x.Item : null }).ToArray()
-            }, JsonOptions))).ToArray();
+            }, JsonOptions), package.Select(x => x.Item).Append(package.Key).ToHashSet(StringComparer.Ordinal))).ToArray();
         return await documents.SubmitAsync(profile, group, PackageOperationKind.Transformation, action, null, drafts, cancellationToken);
     }
 

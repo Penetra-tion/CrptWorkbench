@@ -1,0 +1,45 @@
+@implements IDisposable
+@inject BulkCodeFileService Files
+@inject BulkCodeDownloadTickets Tickets
+
+<div class="bulk-rejected-rows">
+    <button type="button" class="button ghost" disabled="@_loading" aria-expanded="@_open" @onclick="ToggleAsync">Пропущенные строки</button>
+    @if (_open)
+    {
+        <a class="button ghost" href="@DownloadUrl">Скачать пропущенные строки</a>
+        @if (_error is not null) { <p class="error-text" role="alert">@_error</p> }
+        @if (_rows.Count == 0 && !_loading) { <p class="muted">Пропущенных строк пока нет.</p> }
+        @foreach (var row in _rows) { <p style="overflow-wrap:anywhere">@row</p> }
+        <ShowMore VisibleCount="@_rows.Count" HasMore="@(_cursor is not null)" Loading="@_loading" OnMore="LoadAsync" />
+    }
+</div>
+
+@code {
+    [Parameter] public Guid ProfileId { get; set; }
+    [Parameter] public Guid JobId { get; set; }
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly List<string> _rows = [];
+    private FilePageCursor? _cursor;
+    private bool _open, _loading;
+    private string? _error;
+    private string DownloadUrl => "/bulk-code-rejected-download?ticket=" + Uri.EscapeDataString(Tickets.Issue(ProfileId, JobId, []));
+    private async Task ToggleAsync()
+    {
+        _open = !_open;
+        if (_open) { _rows.Clear(); _cursor = null; await LoadAsync(); }
+    }
+    private async Task LoadAsync()
+    {
+        if (_loading) return;
+        _loading = true; _error = null;
+        try
+        {
+            var page = await Files.RejectedPageAsync(ProfileId, JobId, _cursor, _lifetime.Token);
+            _rows.AddRange(page.Items); _cursor = page.NextCursor;
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception) { _error = "Не удалось загрузить пропущенные строки."; }
+        finally { _loading = false; }
+    }
+    public void Dispose() { _lifetime.Cancel(); _lifetime.Dispose(); }
+}

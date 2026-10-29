@@ -7,6 +7,77 @@ namespace CrptWorkbench.Infrastructure;
 
 public sealed class BulkCodeFileStore(string dataDirectory) : IBulkCodeFileStore
 {
+    private string RejectedPath(Guid id, long number) => Path.Combine(JobDirectory(id), "rejected", $"{number / 1000:D6}", $"{number:D12}.txt");
+
+    public async Task WriteRejectedAsync(Guid jobId, long batchNumber, IReadOnlyList<string> lines, CancellationToken cancellationToken)
+    {
+        var path = RejectedPath(jobId, batchNumber);
+        if (lines.Count == 0) { if (File.Exists(path)) File.Delete(path); return; }
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporary = path + ".writing";
+        try
+        {
+            await File.WriteAllLinesAsync(temporary, lines, Utf8, cancellationToken);
+            File.Move(temporary, path, true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    public async Task<FileRecordPage> ReadRejectedPageAsync(Guid jobId, long batchCount, FilePageCursor? cursor, CancellationToken cancellationToken)
+    {
+        if (cursor is { BatchNumber: < 0 } or { ByteOffset: < 0 }) throw new ArgumentOutOfRangeException(nameof(cursor));
+        var result = new List<string>(100);
+        for (var number = cursor?.BatchNumber ?? 0; number < batchCount; number++)
+        {
+            var path = RejectedPath(jobId, number);
+            if (!File.Exists(path)) continue;
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 8192, FileOptions.Asynchronous);
+            var offset = number == cursor?.BatchNumber ? cursor.ByteOffset : 0;
+            stream.Position = offset;
+            var reader = new Utf8PositionReader(stream, offset);
+            while (true)
+            {
+                var before = reader.Position;
+                var line = await reader.ReadLineAsync(cancellationToken);
+                if (line is null) break;
+                if (result.Count == 100) return new(result, new(number, before));
+                result.Add(line);
+            }
+        }
+        return new(result, null);
+    }
+    public async Task<BulkCodeEntryPage> ReadEntriesPageAsync(Guid jobId, long batchCount, IReadOnlySet<string>? statuses,
+        FilePageCursor? cursor = null, CancellationToken cancellationToken = default, int take = 100, FilePageCursor? endCursor = null)
+    {
+        if (take is < 1 or > 100 || cursor is { BatchNumber: < 0 } or { ByteOffset: < 0 })
+            throw new ArgumentOutOfRangeException(nameof(cursor));
+        var result = new List<BulkCodeEntry>(take);
+        for (var number = cursor?.BatchNumber ?? 0; number < batchCount; number++)
+        {
+            if (endCursor is not null && (number > endCursor.BatchNumber || number == endCursor.BatchNumber && endCursor.ByteOffset == 0))
+                return new(result, null);
+            var path = FragmentPath(jobId, number);
+            // A missing fragment may still be in flight. Never checkpoint past it.
+            if (!File.Exists(path)) return new(result, new(number, 0));
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 8192, FileOptions.Asynchronous);
+            var offset = number == cursor?.BatchNumber ? cursor.ByteOffset : 0;
+            stream.Position = offset;
+            var reader = new Utf8PositionReader(stream, offset);
+            if (offset == 0) _ = await reader.ReadLineAsync(cancellationToken);
+            while (true)
+            {
+                var before = reader.Position;
+                if (endCursor is not null && number == endCursor.BatchNumber && before >= endCursor.ByteOffset)
+                    return new(result, null);
+                var line = await reader.ReadLineAsync(cancellationToken);
+                if (line is null) break;
+                if (!TryParseEntry(line, out var status, out var code) || (statuses is { Count: > 0 } && !statuses.Contains(status))) continue;
+                if (result.Count == take) return new(result, new(number, before));
+                result.Add(ParseEntry(line));
+            }
+        }
+        return new(result, null);
+    }
     private readonly string _root = Path.Combine(dataDirectory, "bulk-code-jobs");
     private static readonly UTF8Encoding Utf8 = new(false, true);
     private readonly ConcurrentDictionary<Guid, StatusCountCache> _statusCounts = new();
@@ -41,7 +112,7 @@ public sealed class BulkCodeFileStore(string dataDirectory) : IBulkCodeFileStore
 
     public Stream OpenSource(Guid jobId, long offset)
     {
-        var stream = new FileStream(SourcePath(jobId), FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var stream = new FileStream(SourcePath(jobId), FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
         stream.Position = offset;
         return stream;
     }
@@ -73,6 +144,26 @@ public sealed class BulkCodeFileStore(string dataDirectory) : IBulkCodeFileStore
 
     public bool FragmentExists(Guid jobId, long batchNumber) => File.Exists(FragmentPath(jobId, batchNumber));
 
+    public async Task WriteOwnedFragmentAsync(Guid jobId, long batchNumber, IReadOnlyList<BulkCodeEntry> entries,
+        int found, int errors, CancellationToken cancellationToken)
+    {
+        var path = FragmentPath(jobId, batchNumber);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporary = path + ".writing";
+        try
+        {
+            await using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None, 65536, FileOptions.Asynchronous))
+            await using (var writer = new StreamWriter(stream, Utf8))
+            {
+                await writer.WriteLineAsync($"#{found}\t{errors}".AsMemory(), cancellationToken);
+                foreach (var entry in entries)
+                    await writer.WriteLineAsync(("@2\t" + System.Text.Json.JsonSerializer.Serialize(entry)).AsMemory(), cancellationToken);
+            }
+            File.Move(temporary, path, true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
     public (int Found, int Errors) FragmentSummary(Guid jobId, long batchNumber)
     {
         using var reader = new StreamReader(FragmentPath(jobId, batchNumber), Utf8);
@@ -92,7 +183,7 @@ public sealed class BulkCodeFileStore(string dataDirectory) : IBulkCodeFileStore
         {
             var path = FragmentPath(jobId, number);
             if (!File.Exists(path)) continue;
-            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, FileOptions.Asynchronous);
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 8192, FileOptions.Asynchronous);
             var offset = number == cursor?.BatchNumber ? cursor.ByteOffset : 0;
             stream.Position = offset;
             var reader = new Utf8PositionReader(stream, offset);
@@ -102,7 +193,7 @@ public sealed class BulkCodeFileStore(string dataDirectory) : IBulkCodeFileStore
                 var before = reader.Position;
                 var line = await reader.ReadLineAsync(cancellationToken);
                 if (line is null) break;
-                if (!TryParseEntry(line, out var status, out var code) || !statuses.Contains(status)) continue;
+                if (!TryParseEntry(line, out var status, out var code) || (statuses.Count > 0 && !statuses.Contains(status))) continue;
                 if (result.Count == 100) return new(result, new(number, before));
                 result.Add(code);
             }
@@ -116,12 +207,12 @@ public sealed class BulkCodeFileStore(string dataDirectory) : IBulkCodeFileStore
         {
             var path = FragmentPath(jobId, number);
             if (!File.Exists(path)) continue;
-            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous);
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 65536, FileOptions.Asynchronous);
             using var reader = new StreamReader(stream, Utf8);
             _ = await reader.ReadLineAsync(cancellationToken);
             while (await reader.ReadLineAsync(cancellationToken) is { } line)
             {
-                if (TryParseEntry(line, out var status, out var code) && statuses.Contains(status)) yield return code;
+                if (TryParseEntry(line, out var status, out var code) && (statuses.Count == 0 || statuses.Contains(status))) yield return code;
             }
         }
     }
@@ -148,7 +239,7 @@ public sealed class BulkCodeFileStore(string dataDirectory) : IBulkCodeFileStore
     {
         var path = FragmentPath(jobId, number);
         if (!File.Exists(path)) return false;
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous);
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 65536, FileOptions.Asynchronous);
         using var reader = new StreamReader(stream, Utf8);
         var fragmentCounts = new Dictionary<string, long>(StringComparer.Ordinal);
         _ = await reader.ReadLineAsync(cancellationToken);
@@ -162,10 +253,26 @@ public sealed class BulkCodeFileStore(string dataDirectory) : IBulkCodeFileStore
 
     private static bool TryParseEntry(string line, out string status, out string code)
     {
+        if (line.StartsWith("@2\t", StringComparison.Ordinal))
+        {
+            var entry = ParseEntry(line);
+            status = entry.Status;
+            code = entry.Code;
+            return true;
+        }
         var separator = line.IndexOf('\t');
         status = separator > 0 ? line[..separator] : string.Empty;
         code = separator > 0 ? line[(separator + 1)..] : string.Empty;
         return separator > 0;
+    }
+
+    private static BulkCodeEntry ParseEntry(string line)
+    {
+        if (line.StartsWith("@2\t", StringComparison.Ordinal))
+            return System.Text.Json.JsonSerializer.Deserialize<BulkCodeEntry>(line.AsSpan(3))
+                ?? throw new InvalidDataException("Некорректная строка результатов партии.");
+        var separator = line.IndexOf('\t');
+        return new(line[..separator], line[(separator + 1)..]);
     }
 
     public void Delete(Guid jobId)

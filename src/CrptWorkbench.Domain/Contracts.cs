@@ -9,6 +9,7 @@ public interface IProfileRepository
 
 public interface IApiRequestLogRepository
 {
+    Task<RecordPage<ApiRequestLogSummary>> ListSummaryPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     Task<RecordPage<ApiRequestLog>> ListPageAsync(Guid profileId, RecordPageCursor? cursor = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     Task AddAsync(ApiRequestLog entry, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ApiRequestLog>> ListAsync(Guid profileId, int take, CancellationToken cancellationToken = default);
@@ -69,6 +70,7 @@ public interface IPackageDocumentRepository
     Task AddAsync(PackageDocument document, CancellationToken cancellationToken = default);
     Task UpdateAsync(PackageDocument document, CancellationToken cancellationToken = default);
     Task<bool> CompleteCheckAsync(PackageDocument document, long leaseUntilUnixMs, CancellationToken cancellationToken = default);
+    Task<bool> RenewCheckLeaseAsync(Guid id, long expectedLeaseUntilUnixMs, long nowUnixMs, long leaseUntilUnixMs, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     Task<IReadOnlyList<PackageDocument>> ListAsync(Guid profileId, PackageOperationKind kind, CancellationToken cancellationToken = default);
     Task<PackageDocument?> GetAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PackageDocument>> ClaimDueAsync(long nowUnixMs, int take, CancellationToken cancellationToken = default);
@@ -88,6 +90,7 @@ public interface ITrueApiTokenProvider
         CancellationToken cancellationToken = default);
 
     void Invalidate(IntegrationAuthenticationContext authentication);
+    void Invalidate(IntegrationAuthenticationContext authentication, string rejectedToken) => Invalidate(authentication);
 }
 
 public sealed record IntegrationRequest(
@@ -98,7 +101,13 @@ public sealed record IntegrationRequest(
     string? Body,
     string CorrelationId,
     IntegrationAuthenticationContext? Authentication = null,
-    SuzConnectionContext? SuzConnection = null);
+    SuzConnectionContext? SuzConnection = null)
+{
+    public Func<CancellationToken, Task>? BeforeDispatchAsync { get; init; }
+    // Read-only eligibility check: unlike BeforeDispatchAsync it may run while
+    // waiting. It must not claim sending state or perform other side effects.
+    public Func<CancellationToken, Task<bool>>? CanDispatchAsync { get; init; }
+}
 
 public sealed record IntegrationExchange(
     int StatusCode,
@@ -115,6 +124,13 @@ public interface ITrueApiClient
 {
     Uri BaseAddress { get; }
     Task<IntegrationExchange> ExecuteAsync(IntegrationRequest request, CancellationToken cancellationToken = default);
+    async Task<IntegrationExchange> ExecuteToStreamAsync(IntegrationRequest request, Stream destination, CancellationToken cancellationToken = default)
+    {
+        var exchange = await ExecuteAsync(request, cancellationToken);
+        if (exchange.ResponseBody is not null)
+            await destination.WriteAsync(System.Text.Encoding.UTF8.GetBytes(exchange.ResponseBody), cancellationToken);
+        return exchange with { ResponseBody = null, Exchanges = null };
+    }
 }
 
 public interface INationalCatalogClient

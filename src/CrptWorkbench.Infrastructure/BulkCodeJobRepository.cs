@@ -63,7 +63,7 @@ public sealed class BulkCodeJobRepository(IDbContextFactory<WorkbenchDbContext> 
     public async Task<BulkCodeJob?> NextRunnableAsync(CrptIntegrationMode mode, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        return await db.BulkCodeJobs.AsNoTracking().Where(x => x.Mode == mode && (x.State == "Queued" || x.State == "Running" || x.State == "CancelRequested"))
+        return await db.BulkCodeJobs.AsNoTracking().Where(x => x.Mode == mode && (x.State == "Queued" || x.State == "Running" || x.State == "CancelRequested" || x.State == "PauseRequested"))
             .OrderBy(x => x.CreatedAtUnixMs).FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -79,13 +79,13 @@ public sealed class BulkCodeJobRepository(IDbContextFactory<WorkbenchDbContext> 
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         db.BulkCodeBatches.Add(batch);
-        var job = await db.BulkCodeJobs.SingleAsync(x => x.Id == batch.JobId, cancellationToken);
-        job.NextOffset = batch.EndOffset;
-        job.NextBatchNumber = batch.Number + 1;
-        job.LinesRead = linesRead;
-        if (job.State != "CancelRequested") job.State = "Running";
-        job.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        await db.BulkCodeJobs.Where(x => x.Id == batch.JobId).ExecuteUpdateAsync(s => s
+            .SetProperty(x => x.NextOffset, batch.EndOffset)
+            .SetProperty(x => x.NextBatchNumber, batch.Number + 1)
+            .SetProperty(x => x.LinesRead, linesRead)
+            .SetProperty(x => x.State, x => x.State == "Queued" ? "Running" : x.State)
+            .SetProperty(x => x.UpdatedAt, DateTimeOffset.UtcNow), cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -140,18 +140,36 @@ public sealed class BulkCodeJobRepository(IDbContextFactory<WorkbenchDbContext> 
                 .SetProperty(x => x.UpdatedAt, DateTimeOffset.UtcNow), cancellationToken) == 1;
     }
 
+    public async Task<bool> TransitionStateAsync(Guid profileId, Guid id, CrptIntegrationMode mode,
+        IReadOnlyList<string> expectedStates, string state, string? error, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        return await db.BulkCodeJobs.Where(x => x.ProfileId == profileId && x.Id == id && x.Mode == mode && expectedStates.Contains(x.State))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.State, state).SetProperty(x => x.Error, error)
+                .SetProperty(x => x.UpdatedAt, DateTimeOffset.UtcNow), cancellationToken) == 1;
+    }
+
+    public async Task<bool> TryBeginBatchAsync(Guid profileId, Guid id, CrptIntegrationMode mode, long number, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        // The conditional claim is the dispatch boundary: pause and dispatch serialize in SQLite.
+        // Running batches remain recoverable after a process stops before publishing their fragment.
+        return await db.BulkCodeBatches.Where(x => x.JobId == id && x.Number == number && (x.State == "Queued" || x.State == "Running") &&
+                db.BulkCodeJobs.Any(j => j.Id == id && j.ProfileId == profileId && j.Mode == mode && (j.State == "Queued" || j.State == "Running")))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.State, "Running"), cancellationToken) == 1;
+    }
+
     public async Task RetryFailuresAsync(Guid profileId, Guid id, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var job = await db.BulkCodeJobs.SingleOrDefaultAsync(x => x.ProfileId == profileId && x.Id == id, cancellationToken);
-        if (job is null || job.State is "Running" or "Queued") return;
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        if (await db.BulkCodeJobs.Where(x => x.ProfileId == profileId && x.Id == id &&
+            (x.State == "Partial" || x.State == "Failed" || x.State == "Canceled"))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.FailedBatches, 0).SetProperty(x => x.State, "Queued")
+                .SetProperty(x => x.Error, (string?)null).SetProperty(x => x.UpdatedAt, DateTimeOffset.UtcNow), cancellationToken) == 0) return;
         await db.BulkCodeBatches.Where(x => x.JobId == id && x.State == "Failed")
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.State, "Queued").SetProperty(x => x.Error, (string?)null), cancellationToken);
-        job.FailedBatches = 0;
-        job.State = "Queued";
-        job.Error = null;
-        job.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task DeleteAsync(Guid profileId, Guid id, CancellationToken cancellationToken)

@@ -1,0 +1,6 @@
+.aggregation-lazy-branch { min-width:0; }
+.aggregation-lazy-node .aggregation-lazy-branch { margin-left:min(1rem, 3vw); border-left:1px solid var(--border,#d8dee8); padding-left:.4rem; }
+.aggregation-lazy-row { display:flex; gap:.5rem; align-items:flex-start; margin:.7rem 0; min-width:0; }
+.aggregation-lazy-row>div { min-width:0; }
+.aggregation-code { overflow-wrap:anywhere; word-break:break-word; }
+.aggregation-lazy-row p { margin:.3rem 0; }

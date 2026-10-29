@@ -36,6 +36,17 @@ public sealed class PackageCreationTransportTests
     }
 
     [Fact]
+    public async Task UnauthorizedCreationIsNeverRetried()
+    {
+        using var factory = new Factory { Status = HttpStatusCode.Unauthorized };
+        var tokens = new Tokens();
+        var exchange = await Client(factory, tokens).ExecuteAsync(Request(), TestContext.Current.CancellationToken);
+        Assert.Equal(401, exchange.StatusCode);
+        Assert.Equal(1, factory.Calls);
+        Assert.Equal(1, tokens.Calls);
+    }
+
+    [Fact]
     public async Task InvalidCreationAndRawBypassFailBeforeAuthentication()
     {
         var valid = Request();
