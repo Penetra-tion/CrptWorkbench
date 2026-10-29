@@ -124,21 +124,24 @@ public sealed class RealPermitDocumentClient(IHttpClientFactory clients) : IPerm
                 message.Headers.TryAddWithoutValidation("X-Correlation-Id", request.CorrelationId);
                 try
                 {
-                    using var response = await clients.CreateClient("PermitSgrPublic").SendAsync(message,
-                        HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    var client = clients.CreateClient("PermitSgrPublic");
+                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    deadline.CancelAfter(client.Timeout);
+                    using var response = await client.SendAsync(message,
+                        HttpCompletionOption.ResponseHeadersRead, deadline.Token);
                     if (!response.IsSuccessStatusCode) return Unavailable("Реестр СГР не ответил на запрос.", url);
                     if (response.Content.Headers.ContentLength is > 2_000_000) return Unavailable("Слишком большой ответ реестра СГР.", url);
-                    await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                    await using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
                     using var buffer = new MemoryStream();
                     var block = new byte[8192];
                     int read;
-                    while ((read = await stream.ReadAsync(block, cancellationToken)) > 0)
+                    while ((read = await stream.ReadAsync(block, deadline.Token)) > 0)
                     {
                         if (buffer.Length + read > 2_000_000) return Unavailable("Слишком большой ответ реестра СГР.", url);
                         buffer.Write(block, 0, read);
                     }
                     buffer.Position = 0;
-                    using var document = await JsonDocument.ParseAsync(buffer, new JsonDocumentOptions { MaxDepth = 24 }, cancellationToken);
+                    using var document = await JsonDocument.ParseAsync(buffer, new JsonDocumentOptions { MaxDepth = 24 }, deadline.Token);
                     if (!document.RootElement.TryGetProperty("elements", out var elements) || elements.ValueKind != JsonValueKind.Array)
                         return Unavailable("Реестр СГР изменил формат ответа.", url);
                     var count = 0;
@@ -162,7 +165,7 @@ public sealed class RealPermitDocumentClient(IHttpClientFactory clients) : IPerm
                     if (offset == 900) return Unavailable("Реестр СГР вернул слишком много совпадений для однозначной проверки.", url);
                 }
                 catch (HttpRequestException) { return Unavailable("Реестр СГР временно недоступен.", url); }
-                catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 { return Unavailable("Истекло время ожидания реестра СГР.", url); }
                 catch (JsonException) { return Unavailable("Реестр СГР вернул нечитаемый ответ.", url); }
             }
@@ -203,21 +206,24 @@ public sealed class RealPermitDocumentClient(IHttpClientFactory clients) : IPerm
         message.Headers.TryAddWithoutValidation("X-Correlation-Id", request.CorrelationId);
         try
         {
-            using var response = await clients.CreateClient("PermitEaeuPublic").SendAsync(message,
-                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var client = clients.CreateClient("PermitEaeuPublic");
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(client.Timeout);
+            using var response = await client.SendAsync(message,
+                HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             if (!response.IsSuccessStatusCode) return Unavailable("Единый реестр ЕАЭС не ответил на запрос.");
             if (response.Content.Headers.ContentLength is > 2_000_000) return Unavailable("Слишком большой ответ реестра ЕАЭС.");
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
             using var buffer = new MemoryStream();
             var block = new byte[8192];
             int read;
-            while ((read = await stream.ReadAsync(block, cancellationToken)) > 0)
+            while ((read = await stream.ReadAsync(block, deadline.Token)) > 0)
             {
                 if (buffer.Length + read > 2_000_000) return Unavailable("Слишком большой ответ реестра ЕАЭС.");
                 buffer.Write(block, 0, read);
             }
             buffer.Position = 0;
-            using var document = await JsonDocument.ParseAsync(buffer, new JsonDocumentOptions { MaxDepth = 48 }, cancellationToken);
+            using var document = await JsonDocument.ParseAsync(buffer, new JsonDocumentOptions { MaxDepth = 48 }, deadline.Token);
             var root = document.RootElement;
             if (!root.TryGetProperty("result", out var rows) || rows.ValueKind != JsonValueKind.Array ||
                 !root.TryGetProperty("matchedDocuments", out var matched) || matched.ValueKind != JsonValueKind.Number ||
@@ -255,7 +261,7 @@ public sealed class RealPermitDocumentClient(IHttpClientFactory clients) : IPerm
                 new PermitDocumentResult(number.Value, state, DateTimeOffset.UtcNow, distinct, null, manual));
         }
         catch (HttpRequestException) { return Unavailable("Единый реестр ЕАЭС временно недоступен."); }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         { return Unavailable("Истекло время ожидания реестра ЕАЭС."); }
         catch (JsonException) { return Unavailable("Реестр ЕАЭС вернул нечитаемый ответ."); }
     }

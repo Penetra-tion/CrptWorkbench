@@ -92,16 +92,19 @@ public sealed class RealMercuryClient(IHttpClientFactory clients) : IMercuryClie
         var timer = Stopwatch.StartNew();
         try
         {
-            using var response = await clients.CreateClient("MercuryPublic").SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var client = clients.CreateClient("MercuryPublic");
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(client.Timeout);
+            using var response = await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             if (!response.IsSuccessStatusCode)
                 return Result((int)response.StatusCode, null);
             if (response.Content.Headers.ContentLength is > 1_048_576) return Result(502, null);
-            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
             using var reader = new StreamReader(stream);
             var buffer = new char[8192];
             var text = new System.Text.StringBuilder();
             int count;
-            while ((count = await reader.ReadAsync(buffer.AsMemory(), cancellationToken)) > 0)
+            while ((count = await reader.ReadAsync(buffer.AsMemory(), deadline.Token)) > 0)
             {
                 text.Append(buffer, 0, count);
                 if (text.Length > 1_048_576) return Result(502, null);
@@ -110,7 +113,7 @@ public sealed class RealMercuryClient(IHttpClientFactory clients) : IMercuryClie
             return Result(parsed.Status, parsed.Json);
         }
         catch (HttpRequestException) { return Result(503, null); }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested) { return Result(503, null); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return Result(503, null); }
 
         IntegrationExchange Result(int status, string? body) => new(status, "GET", request.Url, request.Headers, null,
             new Dictionary<string, string> { ["Content-Type"] = "application/json", ["X-Correlation-Id"] = request.CorrelationId },

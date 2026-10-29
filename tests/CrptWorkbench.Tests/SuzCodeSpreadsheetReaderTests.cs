@@ -49,6 +49,18 @@ public sealed class SuzCodeSpreadsheetReaderTests
         await Assert.ThrowsAsync<FormatException>(() => new SuzCodeSpreadsheetReader().ReadFirstColumnAsync(file, Ct));
     }
 
+    [Fact]
+    public async Task StyledBlankCellsDoNotRejectValidTextCodes()
+    {
+        await using var file = Workbook("""
+            <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+            <row r="2"><c r="A2" s="1"/></row>
+            <row r="3"><c r="A3" t="n"><v/></c></row>
+            """);
+        var values = await new SuzCodeSpreadsheetReader().ReadFirstColumnAsync(file, Ct);
+        Assert.Equal(["010464001674838921000001\u001d93tail"], values);
+    }
+
     private static MemoryStream Workbook(string rows)
     {
         var stream = new MemoryStream();

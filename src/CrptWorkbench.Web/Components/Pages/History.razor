@@ -46,7 +46,7 @@
             {
                 @if (_result?.Codes is not null)
                 {
-                    <CodeInfoResultView Results="@_result.Codes" OnCodeSelected="RequestRelatedCode" OnGtinSelected="RequestGtin" OnDocumentSelected="RequestDocument" OnPermitSelected="RequestPermit" ShowOwnCodeAction="@(_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId)" />
+                    <CodeInfoResultView Results="@_result.Codes" OnCodeSelected="RequestRelatedCode" OnGtinSelected="RequestGtin" OnVsdSelected="RequestVsd" OnDocumentSelected="RequestDocument" OnPermitSelected="RequestPermit" ShowOwnCodeAction="@(_selected.OperationId == TrueApiBulkCodeInfoHandler.OperationId)" />
                 }
                 else if (_result?.AggregationJobId is { } jobId) { <a class="button primary" href="@($"/console?operation=true-api.aggregation-tree&aggregationJob={jobId}")">Открыть задание агрегации</a> }
                 else if (_result?.AggregationTree is not null) { <AggregationTreeResultView Result="_result.AggregationTree" /> }
@@ -212,6 +212,8 @@
         QueryHelpers.AddQueryString(OperationNavigation.DocumentUrl(selection), "returnTo", SelectedReturnUrl()));
     private void RequestGtin(string gtin) => Navigation.NavigateTo(QueryHelpers.AddQueryString("/console",
         new Dictionary<string, string?> { ["gtin"] = gtin, ["returnTo"] = SelectedReturnUrl() }));
+    private void RequestVsd(string vsd) => Navigation.NavigateTo(QueryHelpers.AddQueryString("/console",
+        new Dictionary<string, string?> { ["vsd"] = vsd, ["returnTo"] = SelectedReturnUrl() }));
     private void RequestPermit(string number) => Navigation.NavigateTo(QueryHelpers.AddQueryString("/console",
         new Dictionary<string, string?> { ["permit"] = number, ["returnTo"] = SelectedReturnUrl() }));
     private string SelectedReturnUrl() => Navigation.ToAbsoluteUri($"/history?id={_selected!.Id}").ToString();

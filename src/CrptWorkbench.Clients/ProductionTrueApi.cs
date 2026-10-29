@@ -66,15 +66,17 @@ public sealed class TrueApiTokenProvider(
         CancellationToken cancellationToken)
     {
         var client = httpClientFactory.CreateClient(HttpClientNames.TrueApiProduction);
+        using var keyDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        keyDeadline.CancelAfter(client.Timeout);
         using var keyRequest = new HttpRequestMessage(HttpMethod.Get, "auth/key");
         keyRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         keyRequest.Headers.Add("X-Correlation-Id", correlationId);
-        using var keyResponse = await client.SendAsync(keyRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var keyResponse = await client.SendAsync(keyRequest, HttpCompletionOption.ResponseHeadersRead, keyDeadline.Token);
         if (!keyResponse.IsSuccessStatusCode)
             throw AuthenticationFailure("запросе данных для подписи", keyResponse.StatusCode);
 
-        await using var keyStream = await keyResponse.Content.ReadAsStreamAsync(cancellationToken);
-        var challenge = await JsonSerializer.DeserializeAsync<AuthKeyResponse>(keyStream, JsonOptions, cancellationToken);
+        await using var keyStream = await keyResponse.Content.ReadAsStreamAsync(keyDeadline.Token);
+        var challenge = await JsonSerializer.DeserializeAsync<AuthKeyResponse>(keyStream, JsonOptions, keyDeadline.Token);
         if (string.IsNullOrWhiteSpace(challenge?.Uuid) || string.IsNullOrWhiteSpace(challenge.Data))
             throw new InvalidOperationException("True API вернул неполные данные для авторизации.");
 
@@ -92,12 +94,14 @@ public sealed class TrueApiTokenProvider(
         };
         signInRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         signInRequest.Headers.Add("X-Correlation-Id", correlationId);
-        using var signInResponse = await client.SendAsync(signInRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var signInDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        signInDeadline.CancelAfter(client.Timeout);
+        using var signInResponse = await client.SendAsync(signInRequest, HttpCompletionOption.ResponseHeadersRead, signInDeadline.Token);
         if (!signInResponse.IsSuccessStatusCode)
             throw AuthenticationFailure("получении токена", signInResponse.StatusCode);
 
-        await using var tokenStream = await signInResponse.Content.ReadAsStreamAsync(cancellationToken);
-        var result = await JsonSerializer.DeserializeAsync<SignInResponse>(tokenStream, JsonOptions, cancellationToken);
+        await using var tokenStream = await signInResponse.Content.ReadAsStreamAsync(signInDeadline.Token);
+        var result = await JsonSerializer.DeserializeAsync<SignInResponse>(tokenStream, JsonOptions, signInDeadline.Token);
         if (string.IsNullOrWhiteSpace(result?.Token))
             throw new InvalidOperationException("True API не вернул токен авторизации.");
         return result.Token;

@@ -237,16 +237,21 @@
     private async Task<bool> SaveProfileAsync()
     {
         if (_profile is null) return false;
-        _profile.TrueApiProductionBaseUrl = IntegrationOptions.Value.TrueApiBaseUrl;
-        _fieldValidation = ProfileService.ValidateProfile(_profile);
-        if (_fieldValidation.IsValid && !string.IsNullOrWhiteSpace(_profile.CertificateThumbprint) &&
-            !_certificates.Any(x => string.Equals(x.Thumbprint, _profile.CertificateThumbprint, StringComparison.OrdinalIgnoreCase)))
+        var selectionVersion = _profileSelectionVersion;
+        var profile = CopyProfile(_profile);
+        profile.TrueApiProductionBaseUrl = IntegrationOptions.Value.TrueApiBaseUrl;
+        _fieldValidation = ProfileService.ValidateProfile(profile);
+        if (_fieldValidation.IsValid && !string.IsNullOrWhiteSpace(profile.CertificateThumbprint) &&
+            !_certificates.Any(x => string.Equals(x.Thumbprint, profile.CertificateThumbprint, StringComparison.OrdinalIgnoreCase)))
             _fieldValidation = new([new(nameof(CrptProfile.CertificateThumbprint), "Выберите сертификат из списка.")]);
         if (!_fieldValidation.IsValid) { _saveMessage = "Исправьте выделенные поля."; return false; }
-        await ProfileService.SaveAsync(_profile);
-        Logger.LogInformation("UI action {Action} {ProfileId}", "ProfileSaved", _profile.Id);
-        _profiles = await ProfileService.ListAsync();
-        _profile = _profiles.First(x => x.Id == _profile.Id);
+        await ProfileService.SaveAsync(profile);
+        Logger.LogInformation("UI action {Action} {ProfileId}", "ProfileSaved", profile.Id);
+        if (selectionVersion != _profileSelectionVersion) return false;
+        var profiles = await ProfileService.ListAsync();
+        if (selectionVersion != _profileSelectionVersion) return false;
+        _profiles = profiles;
+        _profile = CopyProfile(profiles.First(x => x.Id == profile.Id));
         Workbench.ProfileId = _profile.Id;
         Workbench.NotifyProfileChanged();
         _saveMessage = "Сохранено.";
@@ -256,13 +261,18 @@
     private async Task<bool> SaveTraceXAsync()
     {
         if (_profile is null || string.IsNullOrWhiteSpace(_traceXConnectionInput)) return false;
-        _fieldValidation = ProfileService.ValidateTraceXConnection(_traceXProvider, _traceXConnectionInput);
+        var selectionVersion = _profileSelectionVersion;
+        var profileId = _profile.Id;
+        var provider = _traceXProvider;
+        var connection = _traceXConnectionInput;
+        _fieldValidation = ProfileService.ValidateTraceXConnection(provider, connection);
         if (!_fieldValidation.IsValid) { _traceXMessage = "Исправьте строку подключения TraceX."; return false; }
         if (!await SaveProfileAsync()) return false;
-        await ProfileService.SaveTraceXConnectionAsync(_profile.Id, _traceXProvider, _traceXConnectionInput);
-        Logger.LogInformation("UI action {Action} {ProfileId}", "TraceXSaved", _profile.Id);
-        _profile.TraceXDatabaseProvider = _traceXProvider;
-        _savedTraceXProvider = _traceXProvider;
+        await ProfileService.SaveTraceXConnectionAsync(profileId, provider, connection);
+        Logger.LogInformation("UI action {Action} {ProfileId}", "TraceXSaved", profileId);
+        if (selectionVersion != _profileSelectionVersion) return false;
+        _profile.TraceXDatabaseProvider = provider;
+        _savedTraceXProvider = provider;
         _traceXConnectionInput = string.Empty;
         _traceXConfigured = true;
         _traceXCheck = null;

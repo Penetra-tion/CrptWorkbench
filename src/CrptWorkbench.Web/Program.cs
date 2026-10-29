@@ -158,22 +158,7 @@ try
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
         .AddHttpMessageHandler<MercuryNetworkGuardHandler>()
         .AddHttpMessageHandler(services => new ApiConcurrencyHandler(services.GetRequiredService<IApiRequestLimiter>(), ApiConcurrencyService.Mercury));
-    builder.Services.AddHttpClient(HttpClientNames.SuzProduction)
-        .RemoveAllLoggers()
-        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
-        .AddHttpMessageHandler<MockOnlyNetworkGuardHandler>()
-        .AddHttpMessageHandler<ProductionSuzNetworkGuardHandler>()
-        .AddHttpMessageHandler<CorrelationIdHandler>()
-        .AddHttpMessageHandler<SuzSafeLoggingHandler>()
-        .AddHttpMessageHandler(services => new ApiConcurrencyHandler(services.GetRequiredService<IApiRequestLimiter>(), ApiConcurrencyService.Suz));
-    builder.Services.AddHttpClient(HttpClientNames.SuzAuthentication)
-        .RemoveAllLoggers()
-        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
-        .AddHttpMessageHandler<MockOnlyNetworkGuardHandler>()
-        .AddHttpMessageHandler<SuzAuthenticationNetworkGuardHandler>()
-        .AddHttpMessageHandler<CorrelationIdHandler>()
-        .AddHttpMessageHandler<SuzSafeLoggingHandler>()
-        .AddHttpMessageHandler(services => new ApiConcurrencyHandler(services.GetRequiredService<IApiRequestLimiter>(), ApiConcurrencyService.Suz));
+    builder.Services.AddSuzHttpClients(integrationOptions.Mode);
     builder.Services.AddHttpClient("CrptPipeline")
         .AddHttpMessageHandler<MockOnlyNetworkGuardHandler>()
         .AddHttpMessageHandler<CorrelationIdHandler>()

@@ -45,6 +45,9 @@ public sealed class SuzCodeSpreadsheetReader : ISuzCodeSpreadsheetReader
                 if (cell is null) continue;
                 if (cell.Element(Main + "f") is not null) throw new FormatException("Формулы в первом столбце XLSX не поддерживаются.");
                 var type = (string?)cell.Attribute("t");
+                // Excel retains styled/cleared cells with no value and no text type.
+                if ((type is null or "n") && string.IsNullOrEmpty(cell.Element(Main + "v")?.Value) && cell.Element(Main + "is") is null)
+                    continue;
                 if (type is not ("s" or "inlineStr" or "str"))
                     throw new FormatException("Коды в первом столбце XLSX должны быть текстовыми ячейками.");
                 var value = type switch
