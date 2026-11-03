@@ -12,3 +12,6 @@ artifacts/
 
 **/logs/
 *.log
+
+# Temporary QA workbook generation files
+outputs/manual-qa-1.35.0/.support/
